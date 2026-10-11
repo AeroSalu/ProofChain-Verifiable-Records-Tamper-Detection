@@ -3,9 +3,11 @@
 records   one row per uploaded document: its content, fingerprint, salt,
           suggested and confirmed metadata, and its place in a batch
 batches   one row per batch: open while it collects records, sealed once its
-          root is published
+          root is published. A batch belongs to the custodian whose
+          confirmations fill it (owner), and records who sealed it (sealed_by)
 meta      small key/value store (the ledger public key seen at the first seal)
-staff     the people allowed to sign in: a username and a salted password hash
+staff     the people allowed to sign in: a username, a salted password hash,
+          and whether the account is an admin (may seal any open batch)
 
 Metadata is descriptive only. It is never part of a fingerprint, leaf or root.
 """
@@ -22,7 +24,9 @@ CREATE TABLE IF NOT EXISTS batches (
     tree_size         INTEGER,
     ledger_seq        INTEGER,
     ledger_entry_hash TEXT,
-    sealed_at         TEXT
+    sealed_at         TEXT,
+    owner             TEXT,
+    sealed_by         TEXT
 );
 CREATE TABLE IF NOT EXISTS records (
     id                 INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -46,8 +50,32 @@ CREATE TABLE IF NOT EXISTS meta (
 CREATE TABLE IF NOT EXISTS staff (
     username      TEXT PRIMARY KEY,
     password_hash TEXT NOT NULL,
-    created_at    TEXT NOT NULL
+    created_at    TEXT NOT NULL,
+    is_admin      INTEGER NOT NULL DEFAULT 0
 );
+"""
+
+# Columns added after the first release, as (table, column, definition). db.init_db adds any that an
+# existing database lacks.
+ADDED_COLUMNS = (
+    ("batches", "owner", "TEXT"),
+    ("batches", "sealed_by", "TEXT"),
+    ("staff", "is_admin", "INTEGER NOT NULL DEFAULT 0"),
+)
+
+# Created after the columns above exist. A custodian has at most one open batch.
+INDEXES = """
+CREATE UNIQUE INDEX IF NOT EXISTS one_open_batch_per_owner
+    ON batches (owner) WHERE status = 'open' AND owner IS NOT NULL;
+"""
+
+# For batches that existed before batches had owners: where every record in a batch was confirmed
+# under one name, that name becomes the owner. A batch confirmed under several names keeps no owner.
+ADOPT_OWNERS = """
+UPDATE batches SET owner = (SELECT MIN(confirmed_by) FROM records WHERE batch_id = batches.id)
+WHERE owner IS NULL
+  AND (SELECT COUNT(DISTINCT confirmed_by) FROM records WHERE batch_id = batches.id) = 1
+  AND NOT EXISTS (SELECT 1 FROM records WHERE batch_id = batches.id AND confirmed_by IS NULL);
 """
 
 METADATA_FIELDS = ("issuer", "date", "document_type", "category")
@@ -162,23 +190,25 @@ def list_batches(conn) -> list[dict]:
     return [dict(row) for row in rows]
 
 
-def open_batch(conn) -> dict | None:
-    row = conn.execute("SELECT * FROM batches WHERE status = 'open' ORDER BY id LIMIT 1").fetchone()
+def open_batch(conn, owner: str) -> dict | None:
+    """The custodian's own open batch, if they have one."""
+    row = conn.execute("SELECT * FROM batches WHERE status = 'open' AND owner = ?", (owner,)).fetchone()
     return None if row is None else dict(row)
 
 
-def create_batch(conn) -> str:
+def create_batch(conn, owner: str) -> str:
+    """Open a new batch for a custodian. Ids are numbered in order of creation and name nobody."""
     count = conn.execute("SELECT COUNT(*) FROM batches").fetchone()[0]
     batch_id = f"batch-{count + 1:04d}"
-    conn.execute("INSERT INTO batches (id, status) VALUES (?, 'open')", (batch_id,))
+    conn.execute("INSERT INTO batches (id, status, owner) VALUES (?, 'open', ?)", (batch_id, owner))
     return batch_id
 
 
-def mark_sealed(conn, batch_id: str, root: str, tree_size: int, entry: dict) -> None:
+def mark_sealed(conn, batch_id: str, root: str, tree_size: int, entry: dict, sealed_by: str) -> None:
     conn.execute(
         "UPDATE batches SET status = 'sealed', root = ?, tree_size = ?, ledger_seq = ?, "
-        "ledger_entry_hash = ?, sealed_at = ? WHERE id = ?",
-        (root, tree_size, entry["seq"], entry["entry_hash"], entry["published_at"], batch_id),
+        "ledger_entry_hash = ?, sealed_at = ?, sealed_by = ? WHERE id = ?",
+        (root, tree_size, entry["seq"], entry["entry_hash"], entry["published_at"], sealed_by, batch_id),
     )
 
 

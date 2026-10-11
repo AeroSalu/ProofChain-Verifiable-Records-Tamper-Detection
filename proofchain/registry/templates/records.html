@@ -1,30 +1,51 @@
 {% extends "base.html" %}
 {% block title %}Records and batches{% endblock %}
-{% block content %}
-<h1>Records and batches</h1>
-<p class="lead">Confirmed records collect in the open batch. Sealing a batch builds its Merkle tree and publishes the root to the ledger. After that the batch cannot change, and each record has a proof to download.</p>
 
-{% if not batches %}
-<p class="muted">There are no batches yet. Confirm a record on the Register page to start one.</p>
-{% endif %}
+{% macro overview(batches) %}
+<div class="scroll">
+  <table class="overview">
+    <thead>
+      <tr><th>Batch</th><th>Status</th><th>Owner</th><th>Sealed by</th><th>Records</th><th>Ledger entry</th></tr>
+    </thead>
+    <tbody>
+      {% for batch in batches %}
+      <tr>
+        <td><a href="#{{ batch.id }}">{{ batch.id }}</a></td>
+        <td><span class="tag {{ batch.status }}">{{ batch.status }}</span></td>
+        <td>{{ batch.owner or 'no owner' }}</td>
+        <td>{% if batch.status == 'sealed' %}{{ batch.sealed_by or 'not recorded' }}{% else %}–{% endif %}</td>
+        <td>{{ batch.records | length }}</td>
+        <td>{% if batch.status == 'sealed' %}{{ batch.ledger_seq }}{% else %}–{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endmacro %}
 
-{% for batch in batches %}
-<section class="card">
+{% macro card(batch) %}
+<section class="card" id="{{ batch.id }}">
   <div class="split">
     <h2>{{ batch.id }} <span class="tag {{ batch.status }}">{{ batch.status }}</span></h2>
     {% if batch.status == 'open' %}
-    <form method="post" action="/batches/{{ batch.id }}/seal">
-      <button type="submit" {% if not batch.records %}disabled{% endif %}>Seal batch and publish root</button>
-    </form>
+      {% if batch.can_seal %}
+      <form method="post" action="/batches/{{ batch.id }}/seal">
+        <button type="submit" {% if not batch.records %}disabled{% endif %}>Seal batch and publish root</button>
+      </form>
+      {% else %}
+      <span class="muted">Only {{ batch.owner or 'an admin' }}{% if batch.owner %} or an admin{% endif %} can seal this batch.</span>
+      {% endif %}
     {% endif %}
   </div>
-  {% if batch.status == 'sealed' %}
   <dl class="facts">
+    <dt>Owner</dt><dd>{{ batch.owner or 'no owner' }}</dd>
+    {% if batch.status == 'sealed' %}
+    <dt>Sealed by</dt><dd>{{ batch.sealed_by or 'not recorded' }}</dd>
     <dt>Published root</dt><dd><code>{{ batch.root }}</code></dd>
     <dt>Records</dt><dd>{{ batch.tree_size }}</dd>
     <dt>Ledger entry</dt><dd>{{ batch.ledger_seq }}, published {{ batch.sealed_at }}</dd>
+    {% endif %}
   </dl>
-  {% endif %}
   <div class="scroll">
     <table>
       <thead>
@@ -48,5 +69,25 @@
     </table>
   </div>
 </section>
-{% endfor %}
+{% endmacro %}
+
+{% block content %}
+<h1>Records and batches</h1>
+<p class="lead">Each custodian has their own open batch, and a record joins the batch of whoever confirms it. Sealing a batch builds its Merkle tree and publishes the root to the ledger. After that the batch cannot change, and each record has a proof to download. A batch is sealed by its owner{% if is_admin %}; as an admin you can seal any open batch{% else %} or by an admin{% endif %}.</p>
+
+<h2 id="your-batches">Your batches</h2>
+{% if mine %}
+{{ overview(mine) }}
+{% for batch in mine %}{{ card(batch) }}{% endfor %}
+{% else %}
+<p class="muted">You have no batches yet. Confirm a record on the Register page to start one.</p>
+{% endif %}
+
+<h2 id="other-batches">Other custodians' batches</h2>
+{% if others %}
+{{ overview(others) }}
+{% for batch in others %}{{ card(batch) }}{% endfor %}
+{% else %}
+<p class="muted">No other custodian has a batch.</p>
+{% endif %}
 {% endblock %}

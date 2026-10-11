@@ -38,7 +38,7 @@ pip install -e ".[dev]"
 python -m proofchain.registry.staff add asha
 ```
 
-Add `--reset` to change the password of an existing account.
+Add `--reset` to change the password of an existing account. Add `--admin` to create an admin, who may seal any custodian's open batch; `staff admin <username>` (with `--revoke` to undo) changes an existing account, and `staff list` shows the accounts.
 
 **2. Choose a ledger token.** The ledger accepts a new root only from a caller that presents this shared secret. Generate one, and use the same value in both terminals below:
 
@@ -61,6 +61,8 @@ uvicorn proofchain.registry.app:app --port 8000
 A ledger started without the token still serves every read, but refuses appends and says why.
 
 Open http://localhost:8000 and sign in. Upload a file on **Register**, fill in its details and confirm (the page warns if the same content is already registered), seal the batch on **Records and batches**, then download the document and its proof and check them on **Verify**. The record shows the account that confirmed it.
+
+Each custodian has their own open batch: a record joins the batch of whoever confirms it, and that person seals it. An admin may seal anyone's open batch. **Records and batches** lists your batches first and other custodians' below, with each batch's owner and who sealed it. Batch ids are numbered in order of creation and name nobody. Ownership is kept in the registry's database only; it is not part of a proof or a ledger entry.
 
 Run-time files appear in `data/` (ignored by Git): `registry.db`, `ledger.jsonl`, `ledger_key.pem`, `session_secret`. No `.env` file is needed, and none is read: settings come from the terminal's environment. `.env.example` lists them with their defaults.
 
@@ -103,7 +105,7 @@ In a browser: open `web-verifier/index.html` directly from disk. Choose the docu
 
 ## Demo
 
-A database created before records were salted is refused at startup with a message saying so; start from empty data then too. Start from empty data: stop both services and delete `data/registry.db`, `data/ledger.jsonl`, `data/pin.json` and `data/demo/` together. Then start the ledger and the registry again, as in Run. Deleting the database also deletes its accounts; the seed script below creates one for the demo.
+A database created before records were salted is refused at startup with a message saying so; start from empty data then too. A database from before batches had owners is upgraded in place when the registry starts. Start from empty data: stop both services and delete `data/registry.db`, `data/ledger.jsonl`, `data/pin.json` and `data/demo/` together. Then start the ledger and the registry again, as in Run. Deleting the database also deletes its accounts; the seed script below creates one for the demo.
 
 **1. Seed.** Registers four sample documents, seals them into a batch, leaves a fifth waiting on the Register page, and writes documents, proofs and `pin.json` to `data/demo/`. It publishes a root, so the terminal it runs in needs the ledger token too. It also creates an account named `demo` and prints its random password once; sign in to the pages with that.
 
@@ -167,5 +169,5 @@ Every record gets a random 32-byte salt, and its place in the tree is `SHA-256(0
 - The registry can register a false document. It will verify, because it matches what was registered.
 - A verifier with no pinned checkpoint cannot notice a ledger that was rewritten in full by whoever holds its key.
 - A staff account shows who confirmed a record. It does not show that what they confirmed is true, and anyone with access to the database file can still edit it directly, which is the attack the ledger and the verifier exist to catch.
-- Sign-in is deliberately small: no password recovery, no lockout after failed attempts, no roles, and one shared token between registry and ledger. Run both services behind HTTPS before using them across a network; over plain HTTP the password, the session cookie and the token can be read in transit.
+- Sign-in is deliberately small: no password recovery, no lockout after failed attempts, one admin flag and no finer roles, and one shared token between registry and ledger. Run both services behind HTTPS before using them across a network; over plain HTTP the password, the session cookie and the token can be read in transit.
 - An AI-written explanation is shown beside the verdict and cannot change it, but its wording is not machine-checked.

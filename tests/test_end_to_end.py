@@ -105,7 +105,8 @@ SAMPLES = ["degree_asha_rao.txt", "transcript_asha_rao.txt", "supply_agreement.t
 def test_seed_registers_seals_and_writes_verifiable_files(seeded):
     out = seeded["out"]
     assert sorted(p.name for p in out.iterdir()) == sorted(SAMPLES + [f"{n}.proof.json" for n in SAMPLES] + ["pin.json"])
-    assert [b["status"] for b in query(seeded["db"], "SELECT status FROM batches")] == ["sealed"]
+    assert query(seeded["db"], "SELECT id, status, owner, sealed_by FROM batches") == [
+        {"id": "batch-0001", "status": "sealed", "owner": "demo", "sealed_by": "demo"}]
     pending = query(seeded["db"], "SELECT filename, suggested_metadata FROM records WHERE metadata_confirmed = 0")
     assert [p["filename"] for p in pending] == ["award_letter.txt"]
     assert json.loads(pending[0]["suggested_metadata"])["issuer"] == "City Arts Council"

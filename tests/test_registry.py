@@ -229,7 +229,8 @@ def test_sealing_publishes_the_root_of_the_salted_fingerprints(registry, db_path
 
     assert query(db_path, "SELECT * FROM batches") == [{
         "id": "batch-0001", "status": "sealed", "root": root, "tree_size": 4, "ledger_seq": 0,
-        "ledger_entry_hash": entry["entry_hash"], "sealed_at": entry["published_at"]}]
+        "ledger_entry_hash": entry["entry_hash"], "sealed_at": entry["published_at"],
+        "owner": STAFF, "sealed_by": STAFF}]
     assert query(db_path, "SELECT * FROM meta") == [{"key": "ledger_public_key", "value": ledger.public_key()}]
 
     page = registry.get("/records").text
@@ -240,7 +241,7 @@ def test_seal_again_unknown_batch_and_empty_batch(registry, db_path, ledger):
     sealed_batch(registry, db_path)
     assert seal(registry).status_code == 409
     assert seal(registry, "batch-9999").status_code == 404
-    execute(db_path, "INSERT INTO batches (id, status) VALUES ('batch-0002', 'open')")
+    execute(db_path, "INSERT INTO batches (id, status, owner) VALUES ('batch-0002', 'open', ?)", (STAFF,))
     assert seal(registry, "batch-0002").status_code == 409
     assert len(ledger.entries()) == 1
 

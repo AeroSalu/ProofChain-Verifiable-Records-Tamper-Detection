@@ -281,17 +281,23 @@ def create_app(db_path=None, ledger=None, suggest=None, explain=None, session_se
 
     @app.get("/records")
     def records_page(request: Request, conn: Conn, user: Staff):
+        admin = staff.is_admin(conn, user)
         batches = models.list_batches(conn)
         for batch in batches:
             batch["records"] = models.batch_records(conn, batch["id"])
-        return render(request, "records.html", "records", batches=batches)
+            batch["can_seal"] = batching.may_seal(batch, user, admin)
+        mine = [batch for batch in batches if batch["owner"] == user]
+        others = [batch for batch in batches if batch["owner"] != user]
+        return render(request, "records.html", "records", mine=mine, others=others, is_admin=admin)
 
     @app.post("/batches/{batch_id}/seal")
     def seal(batch_id: str, request: Request, conn: Conn, user: Staff):
         try:
-            entry = batching.seal_batch(conn, batch_id, request.app.state.ledger)
+            entry = batching.seal_batch(conn, batch_id, request.app.state.ledger, user, staff.is_admin(conn, user))
         except batching.NotFound as exc:
             raise Problem(404, str(exc)) from exc
+        except batching.Forbidden as exc:
+            raise Problem(403, str(exc)) from exc
         except batching.Conflict as exc:
             raise Problem(409, str(exc)) from exc
         except LedgerError as exc:

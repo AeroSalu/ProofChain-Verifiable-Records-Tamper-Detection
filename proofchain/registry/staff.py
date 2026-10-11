@@ -1,6 +1,8 @@
 """Staff accounts: who may sign in to the registry.
 
-    python -m proofchain.registry.staff add <username> [--db PATH] [--reset]
+    python -m proofchain.registry.staff add <username> [--admin] [--reset] [--db PATH]
+    python -m proofchain.registry.staff admin <username> [--revoke] [--db PATH]
+    python -m proofchain.registry.staff list [--db PATH]
 
 There is no sign-up page. An account is created from the command line by
 someone with access to the machine, and the password is asked for, never passed
@@ -8,6 +10,8 @@ as an argument.
 
 Only a salted scrypt hash is stored. An account says who registered and
 confirmed a record. It has no bearing on verification, which never needs one.
+
+Each custodian seals their own batch. An admin account may seal any open batch.
 """
 
 import argparse
@@ -66,6 +70,25 @@ def exists(conn, username: str) -> bool:
     return conn.execute("SELECT 1 FROM staff WHERE username = ?", (username,)).fetchone() is not None
 
 
+def is_admin(conn, username: str) -> bool:
+    row = conn.execute("SELECT is_admin FROM staff WHERE username = ?", (username,)).fetchone()
+    return row is not None and bool(row["is_admin"])
+
+
+def set_admin(conn, username: str, admin: bool = True) -> str:
+    """Mark an existing account as an admin, or take that away. Returns the username."""
+    username = normalise_username(username)
+    changed = conn.execute("UPDATE staff SET is_admin = ? WHERE username = ?", (1 if admin else 0, username))
+    if changed.rowcount == 0:
+        raise StaffError(f"there is no account named {username}")
+    return username
+
+
+def list_staff(conn) -> list[dict]:
+    rows = conn.execute("SELECT username, is_admin, created_at FROM staff ORDER BY username")
+    return [{"username": r["username"], "is_admin": bool(r["is_admin"]), "created_at": r["created_at"]} for r in rows]
+
+
 def authenticate(conn, username, password) -> str | None:
     """The account's username if the password is right, otherwise None."""
     username = normalise_username(username)
@@ -78,8 +101,11 @@ def authenticate(conn, username, password) -> str | None:
     return username if verify_password(password, row["password_hash"]) else None
 
 
-def add_staff(conn, username: str, password: str, reset: bool = False) -> str:
-    """Create an account, or with reset replace an existing account's password. Returns the username."""
+def add_staff(conn, username: str, password: str, reset: bool = False, admin: bool = False) -> str:
+    """Create an account, or with reset replace an existing account's password. Returns the username.
+
+    admin makes a new account an admin. It is ignored with reset: use set_admin for an existing account.
+    """
     username = normalise_username(username)
     if not _USERNAME.fullmatch(username):
         raise StaffError("a username is 1 to 64 characters: letters, digits, dot, dash or underscore, "
@@ -93,8 +119,8 @@ def add_staff(conn, username: str, password: str, reset: bool = False) -> str:
             raise StaffError(f"there is no account named {username} to reset")
         return username
     try:
-        conn.execute("INSERT INTO staff (username, password_hash, created_at) VALUES (?, ?, ?)",
-                     (username, hashed, models.now()))
+        conn.execute("INSERT INTO staff (username, password_hash, created_at, is_admin) VALUES (?, ?, ?, ?)",
+                     (username, hashed, models.now(), 1 if admin else 0))
     except sqlite3.IntegrityError:
         raise StaffError(f"an account named {username} already exists; pass --reset to change its password") from None
     return username
@@ -117,20 +143,42 @@ def main(argv=None) -> int:
     add.add_argument("username")
     add.add_argument("--db", default=db.default_path(), help="registry database (default: %(default)s)")
     add.add_argument("--reset", action="store_true", help="replace the password of an existing account")
+    add.add_argument("--admin", action="store_true", help="make the new account an admin, who may seal any open batch")
+    admin = commands.add_parser("admin", help="make an existing account an admin, or with --revoke undo that")
+    admin.add_argument("username")
+    admin.add_argument("--revoke", action="store_true", help="make the account an ordinary custodian again")
+    listing = commands.add_parser("list", help="show the accounts and which are admins")
+    for command in (admin, listing):
+        command.add_argument("--db", default=db.default_path(), help="registry database (default: %(default)s)")
     args = parser.parse_args(argv)
 
     try:
-        password = _ask_password()
+        if args.command == "add":
+            if args.reset and args.admin:
+                raise StaffError("--reset changes a password only; use the admin command to change who is an admin")
+            password = _ask_password()
         db.init_db(args.db)
         conn = db.connect(args.db)
         try:
-            username = add_staff(conn, args.username, password, args.reset)
+            if args.command == "add":
+                username = add_staff(conn, args.username, password, args.reset, args.admin)
+                done = "Changed the password of" if args.reset else \
+                    "Created admin account" if args.admin else "Created account"
+                print(f"{done} {username} in {args.db}.")
+            elif args.command == "admin":
+                username = set_admin(conn, args.username, not args.revoke)
+                print(f"{username} is {'no longer' if args.revoke else 'now'} an admin in {args.db}.")
+            else:
+                accounts = list_staff(conn)
+                for account in accounts:
+                    print(f"{account['username']}{'  (admin)' if account['is_admin'] else ''}")
+                if not accounts:
+                    print(f"There are no accounts in {args.db}.")
         finally:
             conn.close()
     except (StaffError, RuntimeError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
-    print(f"{'Changed the password of' if args.reset else 'Created account'} {username} in {args.db}.")
     return 0
 
 

@@ -11,7 +11,7 @@ its proof bundle, and the ledger head is pinned to pin.json there.
 
 It also creates a staff account named "demo" with a random password, printed
 once, for signing in to the pages. The sample records are confirmed under that
-account by this script, which stands in for the person who would normally check
+account, in a batch it owns and seals, by this script, which stands in for the person who would normally check
 them. That is acceptable for demo data only.
 """
 
@@ -144,7 +144,7 @@ def seed(db_path, ledger_url, out_dir, add=False) -> dict:
             batch_id = batching.confirm_record(conn, record_id, metadata, DEMO_ACCOUNT)
             record_ids.append(record_id)
         try:
-            entry = batching.seal_batch(conn, batch_id, ledger)
+            entry = batching.seal_batch(conn, batch_id, ledger, DEMO_ACCOUNT)
         except LedgerError as exc:
             raise SeedError(f"{exc}. The samples were added and {batch_id} is still open; start from empty "
                             "data again once this is fixed.") from exc

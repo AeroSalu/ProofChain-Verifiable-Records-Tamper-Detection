@@ -31,8 +31,10 @@ python -m venv .venv
 .venv\Scripts\activate
 pip install -e ".[dev]"
 
-# Once: a staff account (prompts for the password; --reset changes one)
+# Once: a staff account (prompts for the password; --reset changes one, --admin makes an admin)
 python -m proofchain.registry.staff add <username>
+python -m proofchain.registry.staff admin <username>     # --revoke to undo
+python -m proofchain.registry.staff list
 
 # Two services, separate terminals, the same $env:PROOFCHAIN_LEDGER_TOKEN set in both
 uvicorn proofchain.ledger.app:app --port 8001
@@ -133,6 +135,8 @@ Behaviour:
 - The Verify page is a convenience, not an independent check: it takes the ledger key and checkpoint from the registry's own database, and says so.
 - Tables are `records`, `batches` and `meta`. Beyond the brief: `batches.ledger_entry_hash`, and `meta` holds the ledger public key seen at the first seal. Together they are the registry's own checkpoint, used by the audit. They live in the database an insider controls, so they catch a ledger-side rewrite, not one where the insider edits them as well.
 - Staff sign in. `registry/staff.py` holds accounts (table `staff`, scrypt hashes, created only by `python -m proofchain.registry.staff add`); `registry/sessions.py` signs the HttpOnly, SameSite=Lax session cookie with `PROOFCHAIN_SESSION_SECRET`, or a secret generated into `session_secret` beside the database. Routes take `user: Staff` (redirects to `/login?next=...` when signed out) or `user: MaybeStaff` (public). `confirmed_by` is the session user; the form has no field for it and a posted value is not read. `batching.confirm_record` is the only place metadata is written.
+- Batches are per custodian. `batches.owner` is whoever's confirmations fill the batch; `batching.confirm_record` puts a record in the confirmer's own open batch and opens one if needed. A partial unique index allows one open batch per owner. `batching.seal_batch(conn, batch_id, ledger, sealed_by, admin)` raises `Forbidden` (403) unless the sealer is the owner or `staff.is_admin`; `batches.sealed_by` records who sealed. Batch ids stay `batch-NNNN` in creation order. Owner and sealer live in the registry database only, never in a proof or ledger entry.
+- New columns go in `models.ADDED_COLUMNS` as well as `SCHEMA`: `db.init_db` adds any an existing database lacks. When `batches.owner` is first added, a batch whose records were all confirmed under one name gets that name as owner; others stay ownerless and only an admin can seal them.
 - Public, and must stay so: `GET`/`POST /verify`, `/login`, `/static`. Everything else on the registry needs a session.
 - Sign-in gives accountability for who confirmed a record. It does not change the trust model; do not word it as making records trustworthy.
 - `create_app(db_path, ledger, suggest, explain)`: `suggest(filename, content) -> dict` and `explain(result)` are the AI hooks and default to none, so tests build a service without AI. A hook that raises is ignored. The module-level `app` that uvicorn runs passes `ai.suggest_metadata` and `ai.explain_result`.

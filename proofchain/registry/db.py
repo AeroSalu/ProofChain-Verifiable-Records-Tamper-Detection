@@ -10,7 +10,7 @@ import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 
-from .models import SCHEMA
+from .models import ADDED_COLUMNS, ADOPT_OWNERS, INDEXES, SCHEMA
 
 DEFAULT_DB_PATH = "data/registry.db"
 
@@ -40,8 +40,22 @@ def init_db(path) -> None:
             raise RuntimeError(
                 f"{path} was created before records were salted and cannot be used. Stop both services and "
                 "delete the registry database, the ledger file and any pin file together, then start again.")
+        _add_missing_columns(conn)
+        conn.executescript(INDEXES)
     finally:
         conn.close()
+
+
+def _add_missing_columns(conn) -> None:
+    """Bring a database made by an earlier version up to the current tables, keeping its data."""
+    added = set()
+    for table, column, definition in ADDED_COLUMNS:
+        existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+        if column not in existing:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+            added.add((table, column))
+    if ("batches", "owner") in added:
+        conn.execute(ADOPT_OWNERS)
 
 
 @contextmanager

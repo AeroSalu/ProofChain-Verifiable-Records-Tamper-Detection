@@ -1,4 +1,7 @@
-"""Confirming records into the open batch, sealing a batch, issuing proofs.
+"""Confirming records into a custodian's open batch, sealing a batch, issuing proofs.
+
+Each custodian has their own open batch. A record joins the batch of whoever
+confirms it, and a batch is sealed by its owner, or by an admin.
 
 Sealing is the step that turns stored records into a published root:
 
@@ -24,10 +27,15 @@ class Conflict(Exception):
     """The record or batch is not in a state that allows this."""
 
 
-def confirm_record(conn, record_id: int, metadata: dict, confirmed_by: str) -> str:
-    """Store the metadata a person confirmed and put the record in the open batch.
+class Forbidden(Exception):
+    """This account may not do this to someone else's batch."""
 
-    This is the only place metadata is written. Returns the batch id.
+
+def confirm_record(conn, record_id: int, metadata: dict, confirmed_by: str) -> str:
+    """Store the metadata a person confirmed and put the record in that person's open batch.
+
+    This is the only place metadata is written. The first confirmation after a
+    seal opens a new batch for the custodian. Returns the batch id.
     """
     with transaction(conn):
         record = models.get_record(conn, record_id)
@@ -35,8 +43,8 @@ def confirm_record(conn, record_id: int, metadata: dict, confirmed_by: str) -> s
             raise NotFound(f"there is no record {record_id}")
         if record["metadata_confirmed"]:
             raise Conflict(f"record {record_id} was already confirmed")
-        batch = models.open_batch(conn)
-        batch_id = batch["id"] if batch else models.create_batch(conn)
+        batch = models.open_batch(conn, confirmed_by)
+        batch_id = batch["id"] if batch else models.create_batch(conn, confirmed_by)
         leaf_index = len(models.batch_records(conn, batch_id))
         models.place_in_batch(conn, record_id, metadata, confirmed_by, batch_id, leaf_index)
     return batch_id
@@ -48,14 +56,25 @@ def _leaves(conn, batch_id: str) -> tuple[list[str], list[str]]:
     return [r["fingerprint"] for r in records], [r["salt"] for r in records]
 
 
-def seal_batch(conn, batch_id: str, ledger) -> dict:
-    """Build the batch's Merkle tree and publish its root. Returns the ledger entry."""
+def may_seal(batch: dict, username: str, admin: bool = False) -> bool:
+    """A batch is sealed by its owner. An admin may seal any open batch, including one with no owner."""
+    return admin or (batch["owner"] is not None and batch["owner"] == username)
+
+
+def seal_batch(conn, batch_id: str, ledger, sealed_by: str, admin: bool = False) -> dict:
+    """Build the batch's Merkle tree and publish its root. Returns the ledger entry.
+
+    sealed_by is the account doing it, and admin says whether that account is an admin.
+    """
     with transaction(conn):
         batch = models.get_batch(conn, batch_id)
         if batch is None:
             raise NotFound(f"there is no batch {batch_id}")
         if batch["status"] != "open":
             raise Conflict(f"{batch_id} is already sealed")
+        if not may_seal(batch, sealed_by, admin):
+            whose = f"belongs to {batch['owner']}" if batch["owner"] else "has no owner"
+            raise Forbidden(f"{batch_id} {whose}. Only its owner or an admin can seal it.")
         fingerprints, salts = _leaves(conn, batch_id)
         if not fingerprints:
             raise Conflict(f"{batch_id} has no records to seal")
@@ -73,7 +92,7 @@ def seal_batch(conn, batch_id: str, ledger) -> dict:
             if entry is None or entry["root"] != root or entry["tree_size"] != len(fingerprints):
                 raise Conflict(f"the ledger already holds a different root for {batch_id}; "
                                "a published root cannot be replaced") from None
-        models.mark_sealed(conn, batch_id, root, len(fingerprints), entry)
+        models.mark_sealed(conn, batch_id, root, len(fingerprints), entry, sealed_by)
     return entry
 
 
