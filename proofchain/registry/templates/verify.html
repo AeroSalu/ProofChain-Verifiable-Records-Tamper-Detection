@@ -40,9 +40,9 @@
 
 {% if explanation %}
 <section class="card">
-  <h2>In plain language <span class="tag">written by AI</span></h2>
-  <p>{{ explanation }}</p>
-  <p class="muted">This explanation was written after the checks finished. It describes the result above and has no part in it.</p>
+  <h2>In plain language <span class="tag">{{ 'standard wording' if explanation.source == 'template' else 'written by AI' }}</span></h2>
+  <p>{{ explanation.text }}</p>
+  <p class="muted">This explanation was {{ 'chosen from fixed wording' if explanation.source == 'template' else 'written' }} after the checks finished. It describes the result above and has no part in it.</p>
 </section>
 {% endif %}
 

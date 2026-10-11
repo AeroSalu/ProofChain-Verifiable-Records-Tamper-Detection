@@ -22,6 +22,7 @@ from fastapi.responses import RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from ..ai import explain_result, suggest_metadata
 from ..core.canonical import CANONS, RAW_BYTES_V1, CanonicalError, fingerprint
 from ..verifier.verify import verify
 from . import audit, batching, db, models
@@ -74,6 +75,15 @@ def _safe_name(filename: str) -> str:
 def _download(body, media_type: str, filename: str) -> Response:
     return Response(body, media_type=media_type,
                     headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
+def _explanation(value) -> dict | None:
+    """An explain hook may return plain text, or an object with text and source."""
+    if not value:
+        return None
+    if isinstance(value, str):
+        return {"text": value, "source": "claude"}
+    return {"text": value.text, "source": value.source}
 
 
 def create_app(db_path=None, ledger=None, suggest=None, explain=None) -> FastAPI:
@@ -231,7 +241,7 @@ def create_app(db_path=None, ledger=None, suggest=None, explain=None) -> FastAPI
         explanation = None
         if request.app.state.explain is not None:
             try:
-                explanation = request.app.state.explain(result)
+                explanation = _explanation(request.app.state.explain(result))
             except Exception:  # an explanation is optional; the verdict above already stands
                 explanation = None
         return render(request, "verify.html", "verify", result=result, explanation=explanation,
@@ -240,4 +250,4 @@ def create_app(db_path=None, ledger=None, suggest=None, explain=None) -> FastAPI
     return app
 
 
-app = create_app()
+app = create_app(suggest=suggest_metadata, explain=explain_result)

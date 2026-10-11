@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Current state
 
-Stages 1 to 4 are implemented and tested: `proofchain/core/`, `proofchain/verifier/`, `proofchain/ledger/` and `proofchain/registry/` (service, audit and pages). Stage 5 (the AI helper) is next. `proofchain/ai/`, `scripts/`, `web-verifier/`, `tests/test_ai_independence.py`, `tests/test_end_to_end.py` and `README.md` are still empty files. Update this file as that changes.
+Stages 1 to 5 are implemented and tested: `proofchain/core/`, `proofchain/verifier/`, `proofchain/ledger/`, `proofchain/registry/` (service, audit and pages) and `proofchain/ai/`. Stage 6 (demo scripts, static browser verifier, README) is next. `scripts/`, `web-verifier/`, `tests/test_end_to_end.py` and `README.md` are still empty files. Update this file as that changes.
+
+The AI helper has only been run against a mock transport. It has not been called with a real credential.
 
 `tests/vectors/examples.json` holds the brief's worked examples (hashes, trees, paths, a three-entry ledger chain) and is exposed as the `vectors` fixture. New code must keep reproducing them.
 
@@ -116,10 +118,20 @@ Behaviour:
 - The Verify page is a convenience, not an independent check: it takes the ledger key and checkpoint from the registry's own database, and says so.
 - Tables are `records`, `batches` and `meta`. Beyond the brief: `batches.ledger_entry_hash`, and `meta` holds the ledger public key seen at the first seal. Together they are the registry's own checkpoint, used by the audit. They live in the database an insider controls, so they catch a ledger-side rewrite, not one where the insider edits them as well.
 - There is no login. Confirming requires a "Confirmed by" name, stored with the record. `batching.confirm_record` is the only place metadata is written.
-- `create_app(db_path, ledger, suggest, explain)`: `suggest(filename, content) -> dict` and `explain(result) -> str` are the AI hooks and default to none. A hook that raises is ignored. Stage 5 plugs in here.
+- `create_app(db_path, ledger, suggest, explain)`: `suggest(filename, content) -> dict` and `explain(result)` are the AI hooks and default to none, so tests build a service without AI. A hook that raises is ignored. The module-level `app` that uvicorn runs passes `ai.suggest_metadata` and `ai.explain_result`.
 - Sealing publishes the root to the ledger first, then marks the batch sealed. If the ledger already holds the same root for that batch, the seal adopts it; if it holds a different one, the seal is refused with 409.
 - Form posts redirect (303) on success. Errors render a page with a real status code: 404, 409, 413, 422, 502.
 - `GET /records/{id}/document` downloads the stored document alongside its proof.
+
+### AI helper
+
+- `ai.suggest_metadata(filename, content) -> dict` and `ai.explain_result(result) -> Explanation(text, source)`. Neither ever raises.
+- Claude is called only when `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN` is set. Without one, no client is built and no network call is made. Any failure (no network, bad key, rate limit, refusal, malformed reply) falls back to `ai/fallback.py`: text rules for suggestions, fixed wording for explanations.
+- Every result names its source, and the pages show it: suggestions are "by Claude (AI)" or "by simple text rules"; explanations are tagged "written by AI" or "standard wording". Fixed wording must never be presented as AI.
+- Requests: `client.beta.messages.parse` / `.create` with model `claude-opus-5-5` (override with `PROOFCHAIN_AI_MODEL`), `output_config={"effort": "low"}`, `betas=["server-side-fallback-2026-07-01"]` with `fallbacks="default"`, no `thinking` parameter. Suggestions use structured output (`output_format=Suggestion`). The client has a 45 second timeout and one retry, and uploads wait for it.
+- PDFs and PNG/JPEG images are sent as the file; text is sent as text, capped at the first 20,000 characters with a note; other binary files are not sent.
+- The explanation is given only `ok`, `codes` and each check's name, status and detail, never hashes. Its text is not machine-checked: a wrong explanation can be displayed, but the verdict banner and codes come from the verifier and cannot move.
+- `ai` imports nothing else from `proofchain`. Tests point the real SDK at an `httpx2.MockTransport` (the SDK is 1.x, built on `httpx2`, not `httpx`).
 
 Self-audit codes: `STORED_CONTENT_CHANGED`, `STORED_FINGERPRINT_CHANGED`, `BATCH_ROOT_DIVERGED`. When content and fingerprint are rewritten consistently, the audit flags the batch and marks its records "not confirmed"; it cannot say which record changed, because the ledger holds only the root.
 

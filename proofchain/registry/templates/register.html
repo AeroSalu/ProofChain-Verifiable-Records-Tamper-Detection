@@ -29,7 +29,7 @@
   <h3>{{ record.filename }}</h3>
   <p class="hash-line">Fingerprint <code>{{ record.fingerprint }}</code> <span class="tag">{{ record.canon }}</span></p>
   {% if record.suggested_metadata %}
-  <p class="muted">The suggestions below were produced automatically. Check each one against the document before using it.</p>
+  <p class="muted">The suggestions below were produced automatically{% if record.suggested_metadata.source == 'claude' %} by Claude (AI){% elif record.suggested_metadata.source == 'rules' %} by simple text rules{% endif %}. Check each one against the document before using it.</p>
   {% else %}
   <p class="muted">There are no suggestions for this record. Enter the details from the document.</p>
   {% endif %}
