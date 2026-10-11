@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="ProofChain — Verifiable Records & Tamper Detection Registry Dashboard">
+  <title>{% block title %}ProofChain Registry{% endblock %}</title>
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@0.263.1/dist/umd/lucide.min.js" defer></script>
+
+  <!-- Spline 3D Viewer Runtime -->
+  <script type="module" src="https://unpkg.com/@splinetool/viewer@1.9.72/build/spline-viewer.js"></script>
+
+  <!-- App Styles -->
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+
+  {% block head %}{% endblock %}
+</head>
+<body class="theme-spline-dark">
+  <!-- Ambient background glow elements -->
+  <div class="ambient-glow ambient-glow--purple"></div>
+  <div class="ambient-glow ambient-glow--cyan"></div>
+
+  <!-- ========================================
+       Sidebar Navigation
+       ======================================== -->
+  <aside class="sidebar" id="sidebar">
+    <a href="{{ url_for('index') }}" class="sidebar__brand">
+      <div class="sidebar__logo-glow">
+        <div class="sidebar__logo">⛓</div>
+      </div>
+      <div>
+        <div class="sidebar__title">ProofChain</div>
+        <div class="sidebar__subtitle">Verifiable Registry</div>
+      </div>
+    </a>
+
+    <!-- Ledger Node Status Pill -->
+    <div class="sidebar__node-status">
+      <span class="pulse-indicator"></span>
+      <div>
+        <span class="node-status__label">Node Synced</span>
+        <span class="node-status__sub">Block #4,822</span>
+      </div>
+    </div>
+
+    <nav class="sidebar__nav">
+      <div class="sidebar__section-label">Overview & Records</div>
+
+      <a href="{{ url_for('records') }}"
+         class="sidebar__link {% if active_page == 'records' %}sidebar__link--active{% endif %}"
+         id="nav-records">
+        <i data-lucide="database" class="sidebar__link-icon"></i>
+        <span>Records Ledger</span>
+      </a>
+
+      <a href="{{ url_for('register') }}"
+         class="sidebar__link {% if active_page == 'register' %}sidebar__link--active{% endif %}"
+         id="nav-register">
+        <i data-lucide="file-plus-2" class="sidebar__link-icon"></i>
+        <span>Register New</span>
+      </a>
+
+      <div class="sidebar__section-label">Cryptographic Verification</div>
+
+      <a href="{{ url_for('verify') }}"
+         class="sidebar__link {% if active_page == 'verify' %}sidebar__link--active{% endif %}"
+         id="nav-verify">
+        <i data-lucide="shield-check" class="sidebar__link-icon"></i>
+        <span>Verify Record</span>
+      </a>
+
+      <a href="{{ url_for('audit') }}"
+         class="sidebar__link {% if active_page == 'audit' %}sidebar__link--active{% endif %}"
+         id="nav-audit">
+        <i data-lucide="scroll-text" class="sidebar__link-icon"></i>
+        <span>Audit Log</span>
+      </a>
+    </nav>
+
+    <div class="sidebar__footer">
+      <div class="sidebar__footer-badge">
+        <span class="sparkle-icon">✦</span> Spline 3D Powered
+      </div>
+      <div>ProofChain &middot; SHA-256 Merkle Tree</div>
+    </div>
+  </aside>
+
+  <!-- ========================================
+       Main Content Area
+       ======================================== -->
+  <div class="main">
+    <!-- Header -->
+    <header class="header">
+      <div class="header__left">
+        <!-- Mobile menu toggle -->
+        <button class="header__icon-btn sidebar-toggle" id="sidebar-toggle" aria-label="Toggle sidebar">
+          <i data-lucide="menu" style="width:18px;height:18px;"></i>
+        </button>
+
+        <nav class="header__breadcrumb" aria-label="Breadcrumb">
+          <a href="{{ url_for('index') }}">ProofChain</a>
+          <span class="header__breadcrumb-separator">/</span>
+          <span class="header__breadcrumb-current">{% block breadcrumb %}Dashboard{% endblock %}</span>
+        </nav>
+      </div>
+
+      <div class="header__right">
+        <div class="header__chip">
+          <i data-lucide="cpu" style="width:14px;height:14px;color:var(--color-accent-cyan);"></i>
+          <span>AI Tamper Engine Active</span>
+        </div>
+
+        <button class="header__icon-btn" id="btn-notifications" aria-label="Notifications" title="System alerts">
+          <i data-lucide="bell" style="width:18px;height:18px;"></i>
+          <span class="notification-badge"></span>
+        </button>
+
+        <a href="https://community.spline.design/file/02cb429e-740b-43c8-a4e6-97ee6de7f9f8" target="_blank" rel="noopener noreferrer" class="header__spline-btn" title="View Spline Source">
+          <span>Spline 3D</span>
+          <i data-lucide="external-link" style="width:13px;height:13px;"></i>
+        </a>
+
+        <div class="header__avatar" title="Security Officer" id="user-avatar">PC</div>
+      </div>
+    </header>
+
+    <!-- Page Content -->
+    <main class="page animate-fade-in">
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          {% for category, message in messages %}
+            <div class="alert alert--{{ category }} glass-card" role="alert">
+              <i data-lucide="check-circle" class="alert__icon"></i>
+              <div class="alert__content">{{ message }}</div>
+            </div>
+          {% endfor %}
+        {% endif %}
+      {% endwith %}
+
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <!-- App JavaScript -->
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+
+  <!-- Initialize Lucide Icons -->
+  <script>
+    document.addEventListener('DOMContentLoaded', function() {
+      if (typeof lucide !== 'undefined') {
+        lucide.createIcons();
+      }
+    });
+  </script>
+
+  {% block scripts %}{% endblock %}
+</body>
+</html>

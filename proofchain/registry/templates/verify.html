@@ -1,0 +1,169 @@
+{% extends "base.html" %}
+
+{% block title %}Verify Record — ProofChain Registry{% endblock %}
+{% block breadcrumb %}Verify Record Integrity{% endblock %}
+
+{% block content %}
+<div class="page__header flex justify-between items-center">
+  <div>
+    <h1 class="page__title">Cryptographic Integrity Verifier</h1>
+    <p class="page__description">
+      Audits canonical fingerprints (<strong>json-sorted-v1</strong> / <strong>raw-bytes-v1</strong>) against domain-separated Merkle leaf hashes.
+    </p>
+  </div>
+</div>
+
+<div class="verify-layout mt-6">
+  <!-- Verification Input Card -->
+  <div class="card glass-card animate-fade-in" style="flex: 1.25;">
+    <div class="card__header">
+      <h2 class="card__title">Integrity Check Console</h2>
+      <p class="card__subtitle">Select an anchored record to inspect its canonical verification pipeline</p>
+    </div>
+    <div class="card__body">
+      <form method="GET" action="{{ url_for('verify') }}" class="verify-form">
+        <div class="form-group">
+          <label class="form-label" for="verify-record-id">Select Record to Verify</label>
+          <div class="input-with-action">
+            <select name="id" id="verify-record-id" class="form-select">
+              <option value="">Select a registered record...</option>
+              {% for record in records %}
+                <option value="{{ record.record_id }}" {% if selected_record and selected_record.record_id == record.record_id %}selected{% endif %}>
+                  {{ record.record_id }} ({{ record.canon or 'json-sorted-v1' }}) — {{ record.status | upper }}
+                </option>
+              {% endfor %}
+            </select>
+            <button type="submit" class="btn btn--primary btn--sm">
+              <i data-lucide="shield-check" class="btn__icon"></i>
+              Audit
+            </button>
+          </div>
+        </div>
+      </form>
+
+      {% if selected_record %}
+        <div class="verification-result-box mt-6 {% if selected_record.status == 'verified' %}verification-result--success{% elif selected_record.status == 'tampered' %}verification-result--danger{% else %}verification-result--pending{% endif %}">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-3">
+              {% if selected_record.status == 'verified' %}
+                <div class="result-badge-icon result-badge-icon--success">
+                  <i data-lucide="check-circle-2"></i>
+                </div>
+                <div>
+                  <h3 class="result-title text-success">100% Canonical Hash Match — Integrity Valid</h3>
+                  <p class="result-subtitle">Canonical reduction verified under <strong>{{ selected_record.canon }}</strong></p>
+                </div>
+              {% elif selected_record.status == 'tampered' %}
+                <div class="result-badge-icon result-badge-icon--danger">
+                  <i data-lucide="alert-triangle"></i>
+                </div>
+                <div>
+                  <h3 class="result-title text-danger">Tamper Detected! Cryptographic Divergence</h3>
+                  <p class="result-subtitle">{{ selected_record.tamper_reason or 'Hash does not match Merkle root commitment' }}</p>
+                </div>
+              {% else %}
+                <div class="result-badge-icon result-badge-icon--warning">
+                  <i data-lucide="clock"></i>
+                </div>
+                <div>
+                  <h3 class="result-title text-warning">Pending Block Commitment</h3>
+                  <p class="result-subtitle">Record queued in validation pool for consensus confirmation.</p>
+                </div>
+              {% endif %}
+            </div>
+            <span class="badge badge--{{ selected_record.status }}">{{ selected_record.status | upper }}</span>
+          </div>
+
+          <!-- Step-by-Step Canonical Pipeline Breakdown -->
+          <div class="canonical-verification-steps mt-5">
+            <div class="pipeline-step">
+              <div class="pipeline-step__num">1</div>
+              <div class="pipeline-step__info">
+                <span class="pipeline-step__title">Canonical Scheme</span>
+                <span class="pipeline-step__code text-accent-cyan">{{ selected_record.canon or 'json-sorted-v1' }}</span>
+              </div>
+            </div>
+
+            <div class="pipeline-step">
+              <div class="pipeline-step__num">2</div>
+              <div class="pipeline-step__info">
+                <span class="pipeline-step__title">SHA-256 Fingerprint</span>
+                <code class="pipeline-step__code">{{ selected_record.hash }}</code>
+              </div>
+            </div>
+
+            <div class="pipeline-step">
+              <div class="pipeline-step__num">3</div>
+              <div class="pipeline-step__info">
+                <span class="pipeline-step__title">RFC 6962 Leaf Hash (<code>0x00 || fp</code>)</span>
+                <code class="pipeline-step__code text-accent-purple">{{ selected_record.leaf_hash or '—' }}</code>
+              </div>
+            </div>
+
+            <div class="pipeline-step">
+              <div class="pipeline-step__num">4</div>
+              <div class="pipeline-step__info">
+                <span class="pipeline-step__title">Merkle Root Anchor</span>
+                <code class="pipeline-step__code">{{ selected_record.merkle_root }}</code>
+              </div>
+            </div>
+          </div>
+
+          <div class="result-meta-grid mt-4">
+            <div class="result-meta-item">
+              <span class="meta-label">Payload Summary</span>
+              <span class="meta-value text-xs text-secondary">{{ selected_record.canonical_summary or '—' }}</span>
+            </div>
+            <div class="result-meta-item">
+              <span class="meta-label">Issuer</span>
+              <span class="meta-value">{{ selected_record.issuer or 'ProofChain Automated Worker' }}</span>
+            </div>
+          </div>
+        </div>
+      {% else %}
+        <div class="verification-placeholder mt-6">
+          <i data-lucide="shield" class="placeholder-icon"></i>
+          <p class="text-sm text-secondary">Choose any record above or from the Records ledger to inspect its canonical hashing tree.</p>
+        </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Merkle Tree Visualizer Panel -->
+  <div class="card glass-card animate-fade-in" style="flex: 0.8; animation-delay: 100ms;">
+    <div class="card__header">
+      <h3 class="card__title flex items-center gap-2">
+        <i data-lucide="git-merge" style="width:16px;height:16px;color:var(--color-accent-purple);"></i>
+        Merkle Proof Path
+      </h3>
+    </div>
+    <div class="card__body">
+      <div class="merkle-tree-flow">
+        <div class="tree-node tree-node--root">
+          <div class="node-badge">Merkle Root (Block)</div>
+          <code class="node-hash">e3b0c4...b855</code>
+        </div>
+        <div class="tree-line"></div>
+        <div class="tree-branch flex justify-between gap-2">
+          <div class="tree-node tree-node--branch">
+            <div class="node-badge">Node (0x01)</div>
+            <code class="node-hash">8a12c...09f2</code>
+          </div>
+          <div class="tree-node tree-node--branch">
+            <div class="node-badge">Node (0x01)</div>
+            <code class="node-hash">3b74d...aa10</code>
+          </div>
+        </div>
+        <div class="tree-line"></div>
+        <div class="tree-node tree-node--leaf">
+          <div class="node-badge">Leaf (0x00 || fp)</div>
+          <code class="node-hash">{% if selected_record %}{{ selected_record.leaf_hash[:12] if selected_record.leaf_hash else selected_record.hash[:12] }}...{% else %}4a5f3e...5f91{% endif %}</code>
+        </div>
+      </div>
+      <p class="text-xs text-secondary mt-4 text-center">
+        Leaves prefixed with 0x00 and branch nodes with 0x01 prevent Merkle tree second-preimage attacks.
+      </p>
+    </div>
+  </div>
+</div>
+{% endblock %}

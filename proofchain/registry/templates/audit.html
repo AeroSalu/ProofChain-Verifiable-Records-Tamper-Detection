@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+
+{% block title %}Audit Log — ProofChain Registry{% endblock %}
+{% block breadcrumb %}Cryptographic Audit Log{% endblock %}
+
+{% block content %}
+<div class="page__header flex justify-between items-center">
+  <div>
+    <h1 class="page__title">Tamper Audit Timeline</h1>
+    <p class="page__description">
+      Full chronological trace of anchor commitments, verification passes, and tamper detection flags.
+    </p>
+  </div>
+  <div class="flex gap-2">
+    <button class="btn btn--secondary btn--sm" id="btn-export-audit">
+      <i data-lucide="download" style="width:14px;height:14px;"></i>
+      Export Audit Report
+    </button>
+  </div>
+</div>
+
+<div class="card glass-card mt-6 animate-fade-in">
+  <div class="card__header flex justify-between items-center">
+    <div>
+      <h2 class="card__title">Security Event Trail</h2>
+      <p class="card__subtitle">Append-only security log secured with cryptographic hashes</p>
+    </div>
+    <span class="badge badge--glow">
+      <span class="badge__dot badge__dot--pulse"></span>
+      Continuous Audit Active
+    </span>
+  </div>
+
+  <div class="card__body">
+    <div class="audit-timeline">
+      {% for log in audit_logs %}
+        <div class="audit-item audit-item--{{ log.severity }}">
+          <div class="audit-item__marker">
+            {% if log.severity == 'danger' %}
+              <i data-lucide="alert-octagon" style="width:16px;height:16px;"></i>
+            {% elif log.severity == 'success' %}
+              <i data-lucide="check" style="width:16px;height:16px;"></i>
+            {% else %}
+              <i data-lucide="activity" style="width:16px;height:16px;"></i>
+            {% endif %}
+          </div>
+          <div class="audit-item__content">
+            <div class="flex justify-between items-center">
+              <span class="audit-event-tag audit-event-tag--{{ log.severity }}">{{ log.event }}</span>
+              <span class="text-xs text-secondary">{{ log.timestamp }}</span>
+            </div>
+            <p class="audit-item__details mt-1">{{ log.details }}</p>
+            <div class="audit-item__meta mt-2 flex gap-3 text-xs text-secondary">
+              <span>Event ID: <strong class="text-white">{{ log.id }}</strong></span>
+              <span>Target: <strong class="text-accent-cyan">{{ log.record_id }}</strong></span>
+            </div>
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endblock %}

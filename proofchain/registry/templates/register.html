@@ -1,0 +1,269 @@
+{% extends "base.html" %}
+
+{% block title %}Register Record — ProofChain Registry{% endblock %}
+{% block breadcrumb %}Register Record (Canonical Hashing){% endblock %}
+
+{% block content %}
+<div class="page__header flex justify-between items-center">
+  <div>
+    <h1 class="page__title">Anchor New Record</h1>
+    <p class="page__description">
+      Compute deterministic SHA-256 fingerprints using canonical forms (<strong>json-sorted-v1</strong> or <strong>raw-bytes-v1</strong>) and anchor into the Merkle tree.
+    </p>
+  </div>
+  <a href="{{ url_for('records') }}" class="btn btn--secondary btn--sm">
+    <i data-lucide="arrow-left" class="btn__icon"></i>
+    Back to Records
+  </a>
+</div>
+
+<div class="register-layout mt-6">
+  <!-- Left Form Card -->
+  <div class="card glass-card animate-fade-in" style="flex: 1.35;">
+    <div class="card__header flex justify-between items-center">
+      <div>
+        <h2 class="card__title">Canonical Specification & Payload</h2>
+        <p class="card__subtitle">Guarantees identical fingerprints across different OS, architectures, and runtimes</p>
+      </div>
+      <span class="badge badge--glow">
+        <span class="badge__dot badge__dot--pulse"></span>
+        RFC 8785 & RFC 6962
+      </span>
+    </div>
+
+    <div class="card__body">
+      <form id="register-form" method="POST" action="{{ url_for('register') }}" enctype="multipart/form-data">
+
+        <!-- Canonical Scheme Selection -->
+        <div class="form-group">
+          <label class="form-label">
+            Canonical Hashing Scheme <span class="form-label__required">*</span>
+          </label>
+          <div class="canon-selector-grid">
+            <label class="canon-card canon-card--active" id="card-canon-json">
+              <input type="radio" name="canon" value="json-sorted-v1" checked class="sr-only" id="radio-canon-json">
+              <div class="canon-card__header">
+                <i data-lucide="code-2" class="canon-card__icon"></i>
+                <span class="canon-card__badge">json-sorted-v1</span>
+              </div>
+              <div class="canon-card__title">RFC 8785 Canonical JSON</div>
+              <p class="canon-card__desc">
+                Keys sorted by Unicode code point, NFC normalized, zero whitespace, integers only (no floats). Ideal for structured data & API payloads.
+              </p>
+            </label>
+
+            <label class="canon-card" id="card-canon-raw">
+              <input type="radio" name="canon" value="raw-bytes-v1" class="sr-only" id="radio-canon-raw">
+              <div class="canon-card__header">
+                <i data-lucide="file-binary" class="canon-card__icon"></i>
+                <span class="canon-card__badge">raw-bytes-v1</span>
+              </div>
+              <div class="canon-card__title">Raw Binary Stream</div>
+              <p class="canon-card__desc">
+                Exact unaltered bytes. No normalization or re-encoding. Required for PDFs, office documents, firmware, and binary files.
+              </p>
+            </label>
+          </div>
+        </div>
+
+        <!-- Record Identifier & Type -->
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label" for="record-id">
+              Record Identifier <span class="form-label__required">*</span>
+            </label>
+            <div class="input-with-action">
+              <input
+                type="text"
+                id="record-id"
+                name="record_id"
+                class="form-input"
+                placeholder="e.g., REC-2026-00942"
+                required
+              >
+              <button type="button" class="btn-input-action" id="btn-generate-id" title="Generate random ID">
+                <i data-lucide="sparkles" style="width:14px;height:14px;"></i>
+                Generate
+              </button>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="record-type">
+              Document Category <span class="form-label__required">*</span>
+            </label>
+            <select id="record-type" name="record_type" class="form-select" required>
+              <option value="contract">Legal Contract</option>
+              <option value="invoice">Commercial Invoice</option>
+              <option value="certificate">Accreditation Certificate</option>
+              <option value="medical">Medical Record</option>
+              <option value="financial">Financial Statement</option>
+              <option value="legal">Compliance Affidavit</option>
+              <option value="other">Other Encrypted Payload</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="record-issuer">Issuer / Certifier</label>
+          <input
+            type="text"
+            id="record-issuer"
+            name="issuer"
+            class="form-input"
+            placeholder="e.g., Global Security Ops or Department of Commerce"
+          >
+        </div>
+
+        <!-- JSON Payload Panel (shown for json-sorted-v1) -->
+        <div class="form-group" id="json-input-section">
+          <div class="flex justify-between items-center mb-1">
+            <label class="form-label" for="json-content">
+              Structured JSON Record <span class="form-label__required">*</span>
+            </label>
+            <button type="button" class="btn-ghost-sm" id="btn-load-sample-json">
+              <i data-lucide="file-code" style="width:13px;height:13px;"></i>
+              Load Sample JSON
+            </button>
+          </div>
+          <textarea
+            id="json-content"
+            name="json_content"
+            class="form-textarea text-mono"
+            rows="6"
+            placeholder='{
+  "record_id": "REC-2026-00891",
+  "issuer": "Global Enterprise Corp",
+  "amount_cents": 250000,
+  "currency": "USD"
+}'
+          ></textarea>
+          <p class="form-hint">
+            <strong>Rule:</strong> Keys are auto-sorted, Unicode NFC normalized, whitespace stripped. <em>Floats are rejected</em> (use integer cents or strings).
+          </p>
+        </div>
+
+        <!-- File Upload Zone (shown for raw-bytes-v1 or optional json upload) -->
+        <div class="form-group" id="file-input-section" style="display: none;">
+          <label class="form-label">
+            File Payload <span class="form-label__required">*</span>
+          </label>
+          <div class="file-upload-dropzone" id="file-dropzone">
+            <input type="file" id="record-file" name="record_file" class="sr-only">
+            <div class="dropzone__icon-glow">
+              <i data-lucide="upload-cloud" class="dropzone__icon"></i>
+            </div>
+            <p class="dropzone__title">
+              <strong>Click to upload</strong> or drag file here
+            </p>
+            <p class="dropzone__hint">PDF, DOCX, TXT, JSON, or Binary payload</p>
+          </div>
+
+          <div id="file-selected-card" class="file-info-chip mt-3" style="display: none;">
+            <i data-lucide="file-check" style="width:16px;height:16px;color:var(--color-accent-cyan);"></i>
+            <span id="file-name-display" class="fw-medium text-white"></span>
+            <span id="file-size-display" class="text-xs text-secondary"></span>
+            <button type="button" id="btn-remove-file" class="btn-chip-remove" title="Remove file">&times;</button>
+          </div>
+        </div>
+
+        <!-- Real-time Canonical Fingerprint Preview -->
+        <div class="form-group">
+          <label class="form-label flex justify-between items-center">
+            <span>Computed Canonical Fingerprint & Merkle Leaf</span>
+            <span class="text-xs text-accent-cyan" id="canon-mode-indicator">json-sorted-v1</span>
+          </label>
+
+          <!-- Error Alert Banner (if float or invalid json detected) -->
+          <div id="canon-error-banner" class="alert alert--danger glass-card mb-2" style="display: none;">
+            <i data-lucide="alert-octagon" class="alert__icon"></i>
+            <div class="alert__content text-xs" id="canon-error-msg"></div>
+          </div>
+
+          <div class="fingerprint-preview-stack">
+            <div class="preview-item">
+              <span class="preview-item__label">SHA-256 Fingerprint:</span>
+              <div class="hash-preview-box">
+                <code id="hash-preview-text" class="hash-code text-accent-cyan">Type JSON or select file...</code>
+                <button type="button" class="btn-copy-hash" id="btn-copy-preview-hash" title="Copy fingerprint">
+                  <i data-lucide="copy" style="width:14px;height:14px;"></i>
+                </button>
+              </div>
+            </div>
+
+            <div class="preview-item mt-2">
+              <span class="preview-item__label">Merkle Leaf Digest (RFC 6962 <code>0x00 || fp</code>):</span>
+              <div class="hash-preview-box">
+                <code id="leaf-preview-text" class="hash-code text-secondary">Awaiting fingerprint...</code>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Submit Button -->
+        <div class="form-actions mt-6">
+          <button type="submit" class="btn btn--primary btn--glow w-full" id="btn-submit-record">
+            <i data-lucide="shield-check" class="btn__icon"></i>
+            Anchor Record with Canonical Fingerprint
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Right Visual Guide Card: The Hashing Engine -->
+  <div class="register-sidebar animate-fade-in" style="flex: 0.85; animation-delay: 150ms;">
+    <div class="card glass-card">
+      <div class="card__header">
+        <h3 class="card__title flex items-center gap-2">
+          <i data-lucide="cpu" style="width:18px;height:18px;color:var(--color-accent-cyan);"></i>
+          The Canonical Hashing Engine
+        </h3>
+      </div>
+      <div class="card__body">
+        <div class="step-guide">
+          <div class="step-item">
+            <div class="step-num">01</div>
+            <div>
+              <div class="step-title">Canonical Reduction</div>
+              <p class="step-desc">
+                <em>"A hash covers bytes, not meaning."</em> Documents are reduced to exact canonical byte form (<strong>json-sorted-v1</strong> or <strong>raw-bytes-v1</strong>).
+              </p>
+            </div>
+          </div>
+
+          <div class="step-item">
+            <div class="step-num">02</div>
+            <div>
+              <div class="step-title">SHA-256 Fingerprint</div>
+              <p class="step-desc">
+                Computed over canonical bytes. Regardless of key order, formatting, or platform, equivalent records yield identical 64-char hex strings.
+              </p>
+            </div>
+          </div>
+
+          <div class="step-item">
+            <div class="step-num">03</div>
+            <div>
+              <div class="step-title">RFC 6962 Domain Separation</div>
+              <p class="step-desc">
+                Leaves are prefixed with <code>0x00</code> (<code>SHA-256(0x00 || fp)</code>) and branch nodes with <code>0x01</code>, preventing leaf-node confusion attacks (CVE-2012-2459).
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div class="callout-glass mt-4">
+          <div class="flex items-center gap-2 text-warning mb-1">
+            <i data-lucide="shield-alert" style="width:16px;height:16px;"></i>
+            <span class="text-xs fw-semibold">Float Rejection Notice</span>
+          </div>
+          <p class="text-xs text-secondary">
+            Per RFC 8785 specification, <code>json-sorted-v1</code> strictly forbids IEEE-754 floating point numbers to avoid cross-language rounding discrepancies.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

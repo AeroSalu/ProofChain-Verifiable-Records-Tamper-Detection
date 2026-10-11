@@ -1,0 +1,279 @@
+{% extends "base.html" %}
+
+{% block title %}Records — ProofChain Registry{% endblock %}
+{% block breadcrumb %}All Records{% endblock %}
+
+{% block content %}
+<!-- ============================================================
+     Spline 3D Interactive Hero Banner
+     ============================================================ -->
+<div class="spline-hero-card glass-panel animate-fade-in">
+  <div class="spline-hero__content">
+    <div class="badge badge--glow">
+      <span class="badge__dot badge__dot--pulse"></span>
+      Deterministic Hashing Engine Active
+    </div>
+    <h1 class="spline-hero__title">
+      Decentralized Records <br/>
+      <span class="text-gradient-neon">Tamper Detection</span>
+    </h1>
+    <p class="spline-hero__subtitle">
+      Protected with canonical serialization (<strong>json-sorted-v1</strong> &amp; <strong>raw-bytes-v1</strong>) and Merkle proof verification. 
+      Interact with the 3D cryptographic cube node below: drag, rotate, and explore.
+    </p>
+    <div class="spline-hero__actions">
+      <a href="{{ url_for('register') }}" class="btn btn--primary btn--glow" id="btn-hero-register">
+        <i data-lucide="plus" class="btn__icon"></i>
+        Register Record
+      </a>
+      <a href="{{ url_for('verify') }}" class="btn btn--secondary" id="btn-hero-verify">
+        <i data-lucide="shield-check" class="btn__icon"></i>
+        Verify Integrity
+      </a>
+    </div>
+  </div>
+
+  <div class="spline-hero__viewer-container">
+    <!-- Live Spline 3D Interactive Scene -->
+    <spline-viewer
+      loading-anim-type="spinner-small-dark"
+      url="https://prod.spline.design/02cb429e-740b-43c8-a4e6-97ee6de7f9f8/scene.splinecode"
+      class="spline-canvas"
+      id="registry-spline-viewer">
+    </spline-viewer>
+    <div class="spline-badge-overlay">
+      <span>✦ Drag 3D Cubes to interact</span>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================
+     Stats Overview Grid
+     ============================================================ -->
+<div class="stats-grid mt-6">
+  <div class="stat-card glass-card animate-fade-in" style="animation-delay: 50ms;">
+    <div class="stat-card__icon stat-card__icon--blue">
+      <i data-lucide="database"></i>
+    </div>
+    <div class="stat-card__info">
+      <div class="stat-card__label">Total Anchored</div>
+      <div class="stat-card__value">{{ stats.total if stats else '0' }}</div>
+      <div class="stat-card__change stat-card__change--up">
+        <i data-lucide="arrow-up-right" style="width:12px;height:12px;"></i>
+        +{{ stats.new_today if stats else '0' }} today
+      </div>
+    </div>
+  </div>
+
+  <div class="stat-card glass-card animate-fade-in" style="animation-delay: 100ms;">
+    <div class="stat-card__icon stat-card__icon--green">
+      <i data-lucide="shield-check"></i>
+    </div>
+    <div class="stat-card__info">
+      <div class="stat-card__label">Verified Valid</div>
+      <div class="stat-card__value text-success">{{ stats.verified if stats else '0' }}</div>
+      <div class="stat-card__change stat-card__change--up">
+        <i data-lucide="check" style="width:12px;height:12px;"></i>
+        Canonical Hash Match
+      </div>
+    </div>
+  </div>
+
+  <div class="stat-card glass-card animate-fade-in" style="animation-delay: 150ms;">
+    <div class="stat-card__icon stat-card__icon--amber">
+      <i data-lucide="clock"></i>
+    </div>
+    <div class="stat-card__info">
+      <div class="stat-card__label">Pending Commitment</div>
+      <div class="stat-card__value text-warning">{{ stats.pending if stats else '0' }}</div>
+      <div class="stat-card__change text-secondary">
+        Next batch at block #4,823
+      </div>
+    </div>
+  </div>
+
+  <div class="stat-card glass-card animate-fade-in" style="animation-delay: 200ms;">
+    <div class="stat-card__icon stat-card__icon--red">
+      <i data-lucide="alert-triangle"></i>
+    </div>
+    <div class="stat-card__info">
+      <div class="stat-card__label">Tamper Alerts</div>
+      <div class="stat-card__value text-danger">{{ stats.tampered if stats else '0' }}</div>
+      <div class="stat-card__change text-danger">
+        <i data-lucide="shield-alert" style="width:12px;height:12px;"></i>
+        Hash Mismatch Detected
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================
+     Filter and Search Bar
+     ============================================================ -->
+<div class="card glass-card mt-6 animate-fade-in" style="animation-delay: 250ms;">
+  <div class="card__body" style="padding: var(--space-4) var(--space-6);">
+    <div class="filter-bar">
+      <div class="search-input">
+        <i data-lucide="search" class="search-input__icon"></i>
+        <input
+          type="text"
+          id="search-records"
+          placeholder="Filter by Record ID, fingerprint, issuer, or keyword... (Press Ctrl + K)"
+          aria-label="Search records"
+        >
+      </div>
+
+      <div class="filter-select-group">
+        <select class="form-select" id="filter-canon" title="Filter by Canonical Scheme">
+          <option value="">All Canonical Forms</option>
+          <option value="json-sorted-v1">json-sorted-v1</option>
+          <option value="raw-bytes-v1">raw-bytes-v1</option>
+        </select>
+
+        <select class="form-select" id="filter-type">
+          <option value="">All Document Types</option>
+          <option value="contract">Contract</option>
+          <option value="invoice">Invoice</option>
+          <option value="certificate">Certificate</option>
+          <option value="medical">Medical Record</option>
+          <option value="financial">Financial Statement</option>
+          <option value="legal">Legal Document</option>
+        </select>
+
+        <select class="form-select" id="filter-status">
+          <option value="">All Statuses</option>
+          <option value="verified">Verified</option>
+          <option value="pending">Pending</option>
+          <option value="tampered">Tampered</option>
+        </select>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================
+     Records Table
+     ============================================================ -->
+<div class="card glass-card mt-4 animate-fade-in" style="animation-delay: 300ms;">
+  <div class="card__header flex justify-between items-center">
+    <div>
+      <h2 class="card__title">Anchored Records</h2>
+      <p class="card__subtitle">Immutable records registered on the Merkle ProofChain</p>
+    </div>
+    <div class="flex gap-2">
+      <button class="btn btn--secondary btn--sm" id="btn-export">
+        <i data-lucide="download" style="width:14px;height:14px;"></i>
+        Export JSON
+      </button>
+      <a href="{{ url_for('register') }}" class="btn btn--primary btn--sm">
+        <i data-lucide="plus" style="width:14px;height:14px;"></i>
+        New Record
+      </a>
+    </div>
+  </div>
+
+  <div class="table-wrapper">
+    <table class="table" id="records-table">
+      <thead>
+        <tr>
+          <th>Record ID</th>
+          <th>Canonical Scheme</th>
+          <th>Type</th>
+          <th>SHA-256 Fingerprint</th>
+          <th>Integrity Status</th>
+          <th>Block / Timestamp</th>
+          <th>Issuer</th>
+          <th style="width: 100px; text-align: right;">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% if records %}
+          {% for record in records %}
+          <tr class="record-row" data-type="{{ record.record_type }}" data-status="{{ record.status }}" data-canon="{{ record.canon or 'json-sorted-v1' }}">
+            <td>
+              <div class="flex items-center gap-2">
+                <i data-lucide="file-text" style="width:16px;height:16px;color:var(--color-accent-purple);"></i>
+                <span class="fw-semibold text-white">{{ record.record_id }}</span>
+              </div>
+            </td>
+            <td>
+              {% if record.canon == 'json-sorted-v1' %}
+                <span class="badge badge--canon-json" title="RFC 8785 Canonical JSON">
+                  <i data-lucide="code-2" style="width:12px;height:12px;"></i>
+                  json-sorted-v1
+                </span>
+              {% else %}
+                <span class="badge badge--canon-raw" title="Unaltered Raw Bytes">
+                  <i data-lucide="file-binary" style="width:12px;height:12px;"></i>
+                  raw-bytes-v1
+                </span>
+              {% endif %}
+            </td>
+            <td>
+              <span class="badge badge--type">{{ record.record_type | capitalize }}</span>
+            </td>
+            <td>
+              <div class="hash-cell">
+                <code class="table__hash" title="{{ record.hash }}">{{ record.hash[:16] }}...{{ record.hash[-6:] }}</code>
+                <button class="btn-copy-hash" data-copy="{{ record.hash }}" title="Copy full SHA-256 fingerprint">
+                  <i data-lucide="copy" style="width:13px;height:13px;"></i>
+                </button>
+              </div>
+            </td>
+            <td>
+              {% if record.status == 'verified' %}
+                <span class="badge badge--verified">
+                  <span class="badge__dot badge__dot--pulse"></span>
+                  Verified
+                </span>
+              {% elif record.status == 'pending' %}
+                <span class="badge badge--pending">
+                  <span class="badge__dot"></span>
+                  Pending
+                </span>
+              {% elif record.status == 'tampered' %}
+                <span class="badge badge--tampered">
+                  <span class="badge__dot badge__dot--pulse"></span>
+                  Tampered!
+                </span>
+              {% endif %}
+            </td>
+            <td>
+              <div class="text-sm text-primary-white">
+                {% if record.block_height %}
+                  <span class="block-tag">#{{ record.block_height }}</span>
+                {% else %}
+                  <span class="block-tag block-tag--pending">Uncommitted</span>
+                {% endif %}
+              </div>
+              <div class="text-xs text-secondary">{{ record.created_at }}</div>
+            </td>
+            <td>
+              <span class="text-sm text-secondary">{{ record.issuer or '—' }}</span>
+            </td>
+            <td style="text-align: right;">
+              <div class="flex justify-end gap-2">
+                <a href="{{ url_for('verify') }}?id={{ record.record_id }}" class="btn btn--ghost btn--sm" title="Verify Integrity">
+                  <i data-lucide="shield-check" style="width:15px;height:15px;color:var(--color-accent-cyan);"></i>
+                </a>
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        {% else %}
+          <tr>
+            <td colspan="8">
+              <div class="empty-state">
+                <i data-lucide="inbox" class="empty-state__icon"></i>
+                <h3 class="empty-state__title">No records registered yet</h3>
+                <p class="empty-state__description">Register your first document to anchor its canonical fingerprint in ProofChain.</p>
+                <a href="{{ url_for('register') }}" class="btn btn--primary mt-4">Register First Record</a>
+              </div>
+            </td>
+          </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
