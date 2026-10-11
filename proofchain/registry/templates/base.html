@@ -8,29 +8,22 @@
 </head>
 <body>
   <header class="top">
-    <div class="top-inner">
-      <a class="brand" href="/">
-        <span class="brand-mark" aria-hidden="true">P</span>
-        <span>ProofChain <small>registry</small></span>
-      </a>
-      <nav aria-label="Primary navigation">
-        <a href="/register" {% if page == 'register' %}aria-current="page"{% endif %}>Register</a>
-        <a href="/records" {% if page == 'records' %}aria-current="page"{% endif %}>Records <span class="nav-detail">&amp; batches</span></a>
-        <a href="/audit" {% if page == 'audit' %}aria-current="page"{% endif %}>Audit</a>
-        <a href="/verify" {% if page == 'verify' %}aria-current="page"{% endif %}>Verify</a>
-      </nav>
-    </div>
+    <a class="brand" href="/">ProofChain <span>registry</span></a>
+    <nav>
+      <a href="/register" {% if page == 'register' %}aria-current="page"{% endif %}>Register</a>
+      <a href="/records" {% if page == 'records' %}aria-current="page"{% endif %}>Records and batches</a>
+      <a href="/audit" {% if page == 'audit' %}aria-current="page"{% endif %}>Audit</a>
+      <a href="/verify" {% if page == 'verify' %}aria-current="page"{% endif %}>Verify</a>
+    </nav>
   </header>
-  <main class="page-shell">
+  <main>
     {% if notice %}<p class="banner good" role="status">{{ notice }}</p>{% endif %}
     {% if error %}<p class="banner bad" role="alert">{{ error }}</p>{% endif %}
     {% block content %}{% endblock %}
   </main>
-  <footer class="site-footer">
-    <div class="footer-inner">
-      <span class="footer-mark">ProofChain</span>
-      <span>Records are tamper-evident, not tamper-proof. Verification confirms a registered match.</span>
-    </div>
+  <footer>
+    Records here are tamper-evident, not tamper-proof. A verified document matches a registered record.
+    That does not prove who created it or that its contents are true.
   </footer>
   <script src="{{ url_for('static', path='app.js') }}" defer></script>
 </body>
