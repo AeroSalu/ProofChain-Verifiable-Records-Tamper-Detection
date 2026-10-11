@@ -1,0 +1,126 @@
+{
+ "avalanche": {
+  "a_text": "Certificate of Completion: Asha Rao, 2026",
+  "b_text": "Certificate of Completion: Asha Rao, 2027",
+  "a": "d1e9b977c3a3ecaaa8499d445ba43f8569cd57ff288ec8518e70bf5c0e7409cb",
+  "b": "07ae032dd691a3f8983386253f912dcfe95525e63c9b383015a603647b4cfa85",
+  "bits_changed": 117
+ },
+ "canon": {
+  "raw1": "{\"name\": \"Asha Rao\", \"course\": \"Data Structures\", \"year\": 2026}",
+  "raw2": "{\n  \"year\": 2026,\n  \"course\": \"Data Structures\",\n  \"name\": \"Asha Rao\"\n}",
+  "raw1_hash": "4052a5132e3df1a9d3f9c7b5c039845c5838f14fa5ea2b7eba49b173972e2e00",
+  "raw2_hash": "230892b6ae35ee9af0f66c128216d3f979b0f5ef7f1ff44cb378124c601f010f",
+  "canonical": "{\"course\":\"Data Structures\",\"name\":\"Asha Rao\",\"year\":2026}",
+  "canonical_hash": "cec7f2f6b8ebc0a612fdb3b5fadaa380d1d85be7a6c0412708814054796faba5"
+ },
+ "tree4": {
+  "fingerprints": [
+   "e39e3d8db029f540711c29f7680e41d4b68179a7d90ee715d2ff2b253ce8c996",
+   "80d6f473664eb36e60e8aff41a7b055bb6f2a8a605a54150f783198c42994354",
+   "90eafcf01a14b00bf7d8e2ab6abd10b1e6944ad0fc3d7ac1dfeacff8976ba4aa",
+   "8fb7d0d397ebb1a6237aa3ef36d0b7f5f5a9c6f2f9cf398478c813d8e26592a0"
+  ],
+  "levels": [
+   [
+    "2bad59fe992b325023918496ab0066bf34144fd5a36d888a2d26f4fee0d50c2b",
+    "b0d12303dba90298cb2c4fc50ca8491e202921ac78c13d48adc8093175b9dd05",
+    "ef6860f2459adc96d870eddcf98b4b01437abfb3044db6cfc19786ee44cd53b0",
+    "3f3f18a16988ee47522a0f08f4c21bd7687b126030323cb2d3c60b38cae7f494"
+   ],
+   [
+    "989e2e6fd32d70ca8443ba766cb386a3750c114c5ed75dd38ff84495447a4ff1",
+    "010b2784e33a8d696e6e1c92bdc8663f5b26d581f1508f6ccc6c9dab5aa6f0e1"
+   ],
+   [
+    "3a41957e48b5aeb1eb57ad1ef8f84e13c2d430783215c136b8effeda95e98c40"
+   ]
+  ],
+  "index": 2,
+  "path": [
+   {
+    "hash": "3f3f18a16988ee47522a0f08f4c21bd7687b126030323cb2d3c60b38cae7f494",
+    "side": "right"
+   },
+   {
+    "hash": "989e2e6fd32d70ca8443ba766cb386a3750c114c5ed75dd38ff84495447a4ff1",
+    "side": "left"
+   }
+  ],
+  "root": "3a41957e48b5aeb1eb57ad1ef8f84e13c2d430783215c136b8effeda95e98c40",
+  "fold_steps": [
+   "ef6860f2459adc96d870eddcf98b4b01437abfb3044db6cfc19786ee44cd53b0",
+   "010b2784e33a8d696e6e1c92bdc8663f5b26d581f1508f6ccc6c9dab5aa6f0e1",
+   "3a41957e48b5aeb1eb57ad1ef8f84e13c2d430783215c136b8effeda95e98c40"
+  ],
+  "tampered_fp": "8396bf8447a9109974bf98046d1ef80aa62867afb2d5c007753fd495a11207e6",
+  "tampered_root": "338d1757c00018ae214501b90edc1f8748fb0b67580b4ce191521cd163054b4e"
+ },
+ "tree5": {
+  "fingerprints": [
+   "e39e3d8db029f540711c29f7680e41d4b68179a7d90ee715d2ff2b253ce8c996",
+   "80d6f473664eb36e60e8aff41a7b055bb6f2a8a605a54150f783198c42994354",
+   "90eafcf01a14b00bf7d8e2ab6abd10b1e6944ad0fc3d7ac1dfeacff8976ba4aa",
+   "8fb7d0d397ebb1a6237aa3ef36d0b7f5f5a9c6f2f9cf398478c813d8e26592a0",
+   "655b63bd35640d5cf9f21aa7df69459349bdcf0a1c48a9bd7519f2ade23d4dd2"
+  ],
+  "levels": [
+   [
+    "2bad59fe992b325023918496ab0066bf34144fd5a36d888a2d26f4fee0d50c2b",
+    "b0d12303dba90298cb2c4fc50ca8491e202921ac78c13d48adc8093175b9dd05",
+    "ef6860f2459adc96d870eddcf98b4b01437abfb3044db6cfc19786ee44cd53b0",
+    "3f3f18a16988ee47522a0f08f4c21bd7687b126030323cb2d3c60b38cae7f494",
+    "7094d8f22f186b8764b5caa6f9a65f2372b2aceac94edceae71bf252eb99fe36"
+   ],
+   [
+    "989e2e6fd32d70ca8443ba766cb386a3750c114c5ed75dd38ff84495447a4ff1",
+    "010b2784e33a8d696e6e1c92bdc8663f5b26d581f1508f6ccc6c9dab5aa6f0e1",
+    "7094d8f22f186b8764b5caa6f9a65f2372b2aceac94edceae71bf252eb99fe36"
+   ],
+   [
+    "3a41957e48b5aeb1eb57ad1ef8f84e13c2d430783215c136b8effeda95e98c40",
+    "7094d8f22f186b8764b5caa6f9a65f2372b2aceac94edceae71bf252eb99fe36"
+   ],
+   [
+    "3de1575b7131b491d8e4fa6a9bc83aa648776f8be745e1ef1eaae8ec8443316e"
+   ]
+  ],
+  "index": 4,
+  "path": [
+   {
+    "hash": "3a41957e48b5aeb1eb57ad1ef8f84e13c2d430783215c136b8effeda95e98c40",
+    "side": "left"
+   }
+  ],
+  "root": "3de1575b7131b491d8e4fa6a9bc83aa648776f8be745e1ef1eaae8ec8443316e"
+ },
+ "chain": [
+  {
+   "seq": 0,
+   "batch_id": "batch-0001",
+   "root": "3a41957e48b5aeb1eb57ad1ef8f84e13c2d430783215c136b8effeda95e98c40",
+   "tree_size": 4,
+   "published_at": "2026-10-11T09:00:00Z",
+   "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+   "entry_hash": "739e5bedf4deac095f461dbe1ac530539945a5c34974bf0afc5c908285c5f57d"
+  },
+  {
+   "seq": 1,
+   "batch_id": "batch-0002",
+   "root": "3de1575b7131b491d8e4fa6a9bc83aa648776f8be745e1ef1eaae8ec8443316e",
+   "tree_size": 5,
+   "published_at": "2026-10-12T09:00:00Z",
+   "prev_hash": "739e5bedf4deac095f461dbe1ac530539945a5c34974bf0afc5c908285c5f57d",
+   "entry_hash": "075867b2f3e05b9e5413590b2a3c6ae2be637f344be8bde9332b9dbe90d74bec"
+  },
+  {
+   "seq": 2,
+   "batch_id": "batch-0003",
+   "root": "b562b8da4b3bf0bca0dc09c749ec16ef6abf9e3562cfd8fcb30a4fcbac1434a7",
+   "tree_size": 7,
+   "published_at": "2026-10-13T09:00:00Z",
+   "prev_hash": "075867b2f3e05b9e5413590b2a3c6ae2be637f344be8bde9332b9dbe90d74bec",
+   "entry_hash": "c13f91a2390dddaf052a04a0298f95e7569bdb54518e38f72c68c0c4cad4a4c5"
+  }
+ ]
+}

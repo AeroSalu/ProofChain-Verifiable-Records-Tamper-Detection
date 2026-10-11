@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Current state
 
-This is a skeleton. Every source file under `proofchain/`, `scripts/`, `tests/` and `web-verifier/`, plus `README.md`, is empty. Nothing has been implemented. Setup is done: `pyproject.toml` declares the package and dependencies, and `.env.example` lists the settings. Update this file as that changes.
+Stage 1 (the core library) is implemented and tested: `proofchain/core/` with `tests/test_canonical.py`, `test_merkle.py`, `test_proof.py` and the format part of `test_ledger.py`. Everything else under `proofchain/`, `scripts/`, `tests/` and `web-verifier/`, plus `README.md`, is still an empty file. Update this file as that changes.
+
+`tests/vectors/examples.json` holds the brief's worked examples (hashes, trees, paths, a three-entry ledger chain) and is exposed as the `vectors` fixture. New code must keep reproducing them.
 
 The specification is `context/ProofChain_Project_Brief.docx` (problem B-01, Domain 3: Blockchain and Decentralized Trust). It is the source of truth for formats, result codes, endpoints and build order. `context/filestructureinfo.docx` explains what each file is intended to hold. Both are `.docx`; extract the text to read them (for example `unzip -p <file> word/document.xml` and strip the tags).
 
@@ -18,7 +20,7 @@ The threat model assumes an insider with full read and write access to the regis
 
 ## Commands
 
-Setup and `pytest` work now (no tests exist yet). The service and verifier commands are the ones planned in the brief and do not work until the code is written.
+Setup and `pytest` work now. The service and verifier commands are the ones planned in the brief and do not work until those stages are written.
 
 ```powershell
 python -m venv .venv
@@ -72,6 +74,9 @@ Four components, separated so that the registry (the thing being checked) has no
 - An unpaired entry at any level is promoted unchanged. It is never duplicated (avoids the CVE-2012-2459 weakness).
 - Ledger `entry_hash` is the SHA-256 of the canonical JSON of `seq`, `batch_id`, `root`, `tree_size`, `published_at`, `prev_hash`. The signature is Ed25519 over `entry_hash`.
 - Verifiers pin a checkpoint (`seq:entry_hash`) and reject any ledger that does not contain it.
+- Ledger `seq` starts at 0 and the first entry's `prev_hash` is 64 zeros.
+- A proof's path shape is fixed by `leaf_index` and `tree_size` (`merkle.expected_sides`). `proof.from_dict` rejects a bundle whose sides or length differ, and rejects unknown fields and uppercase hex.
+- `core` checks structure and hashes only. Ed25519 signatures and pinned checkpoints are outside it because `core` is standard library only.
 
 ### Verifier result codes
 
