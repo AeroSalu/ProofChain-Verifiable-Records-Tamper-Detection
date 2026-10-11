@@ -6,19 +6,33 @@ A registry gives every document a SHA-256 fingerprint, groups fingerprints into 
 
 A pass proves that a document is identical to one registered at a known point in the ledger. It does not prove who created the document or that its contents are true. The records are tamper-evident, not tamper-proof.
 
+## Features
+
+- **Fingerprints from a defined form.** SHA-256 over the exact file bytes (`raw-bytes-v1`), or over a canonical form of a structured JSON record (`json-sorted-v1`). Each proof names the form it used.
+- **Merkle batches with published roots.** One root commits to every record in a batch. The root goes to a separate ledger that is hash-chained and signed with Ed25519, and has no way to update or delete an entry.
+- **Salted leaves.** Every record gets its own random salt, so each registration is a distinct leaf and the sibling hashes in a proof cannot be matched against guessed documents.
+- **Independent verification.** A command-line verifier and a single-file browser verifier check a document from the document, its proof and the ledger alone. Five checks always run, and the result names the one that failed.
+- **Pinned checkpoints.** A verifier remembers a ledger entry it has seen and rejects any ledger that no longer contains it.
+- **Self-audit.** The registry recomputes its stored fingerprints and batch roots and compares them with the ledger.
+- **Custodian login.** Staff sign in to register, confirm and seal, and each confirmation records the account that made it. Accounts are created from the command line only.
+- **Batches per custodian.** Each custodian fills and seals their own batch. An admin may seal any open batch, and the batch records who sealed it.
+- **Ledger append token.** The ledger accepts a new root only from a caller that presents a shared secret. Reading it is open to everyone.
+- **Advisory AI.** Claude, or simple text rules without a key, suggests metadata for a person to confirm and explains a finished result in plain language. It cannot change a fingerprint, a proof or a verdict.
+- **Tamper demo.** Scripts seed sample data and then alter the database and the ledger the way an insider would, to show each attack being caught.
+
 ## Parts
 
 | Part | Where | What it does |
 |---|---|---|
 | Core library | `proofchain/core/` | Canonical forms, fingerprint, Merkle tree, proof format. Standard library only. |
 | Verifier | `proofchain/verifier/` | The five checks and a command line. Imports the core only. |
-| Ledger | `proofchain/ledger/` | Service on port 8001 with its own key. Append and read only. |
-| Registry | `proofchain/registry/` | Service on port 8000: staff sign-in, upload, confirm, seal, proofs, self-audit, pages. |
+| Ledger | `proofchain/ledger/` | Service on port 8001 with its own key. Append (with a token) and read only. |
+| Registry | `proofchain/registry/` | Service on port 8000: custodian login, upload, confirm, seal per custodian, proofs, self-audit, pages. |
 | AI helper | `proofchain/ai/` | Suggests metadata and explains results. Advisory only; a person confirms. |
 | Browser verifier | `web-verifier/index.html` | A second, independent implementation of the checks. One static file. |
 | Demo scripts | `scripts/` | Seed sample data; alter the database as an insider would. |
 
-The full specification is `context/ProofChain_Project_Brief.docx`.
+The full specification is `context/ProofChain_Project_Brief.docx`, and `context/filestructureinfo.docx` says what every file does.
 
 ## Install
 
@@ -60,11 +74,26 @@ uvicorn proofchain.registry.app:app --port 8000
 
 A ledger started without the token still serves every read, but refuses appends and says why.
 
-Open http://localhost:8000 and sign in. Upload a file on **Register**, fill in its details and confirm (the page warns if the same content is already registered), seal the batch on **Records and batches**, then download the document and its proof and check them on **Verify**. The record shows the account that confirmed it.
+Open http://localhost:8000 and sign in on the **Custodian Login** page. Upload a file on **Register**, fill in its details and confirm (the page warns if the same content is already registered), seal the batch on **Records and batches**, then download the document and its proof and check them on **Verify**. The record shows the account that confirmed it. An upload made by mistake can be discarded while it is still waiting; once confirmed, a record cannot be removed. A session lasts 12 hours, or until you sign out.
 
 Each custodian has their own open batch: a record joins the batch of whoever confirms it, and that person seals it. An admin may seal anyone's open batch. **Records and batches** lists your batches first and other custodians' below, with each batch's owner and who sealed it. Batch ids are numbered in order of creation and name nobody. Ownership is kept in the registry's database only; it is not part of a proof or a ledger entry.
 
-Run-time files appear in `data/` (ignored by Git): `registry.db`, `ledger.jsonl`, `ledger_key.pem`, `session_secret`. No `.env` file is needed, and none is read: settings come from the terminal's environment. `.env.example` lists them with their defaults.
+Run-time files appear in `data/` (ignored by Git): `registry.db`, `ledger.jsonl`, `ledger_key.pem`, `session_secret`.
+
+### Settings
+
+No `.env` file is needed, and none is read: settings come from the terminal's environment. Only the ledger token has to be set.
+
+| Setting | Default | Used by |
+|---|---|---|
+| `PROOFCHAIN_LEDGER_TOKEN` | none; must be set | Ledger, registry and seed script: the shared secret for appending a root |
+| `PROOFCHAIN_SESSION_SECRET` | generated into `data/session_secret` | Registry: signs session cookies (at least 32 characters) |
+| `PROOFCHAIN_DB_PATH` | `data/registry.db` | Registry |
+| `PROOFCHAIN_LEDGER_PATH` | `data/ledger.jsonl` | Ledger |
+| `PROOFCHAIN_LEDGER_KEY_PATH` | `data/ledger_key.pem` | Ledger. The key is created on first start. |
+| `PROOFCHAIN_LEDGER_URL` | `http://localhost:8001` | Registry: where it finds the ledger |
+| `ANTHROPIC_API_KEY` | empty | AI helper (optional) |
+| `PROOFCHAIN_AI_MODEL` | `claude-opus-5-5` | AI helper: which Claude model to ask |
 
 ### Who needs an account
 
@@ -105,9 +134,11 @@ In a browser: open `web-verifier/index.html` directly from disk. Choose the docu
 
 ## Demo
 
-A database created before records were salted is refused at startup with a message saying so; start from empty data then too. A database from before batches had owners is upgraded in place when the registry starts. Start from empty data: stop both services and delete `data/registry.db`, `data/ledger.jsonl`, `data/pin.json` and `data/demo/` together. Then start the ledger and the registry again, as in Run. Deleting the database also deletes its accounts; the seed script below creates one for the demo.
+Start from empty data: stop both services and delete `data/registry.db`, `data/ledger.jsonl`, `data/pin.json` and `data/demo/` together, then start the ledger and the registry again as in Run. Deleting the database also deletes its accounts; the seed script below creates one for the demo.
 
-**1. Seed.** Registers four sample documents, seals them into a batch, leaves a fifth waiting on the Register page, and writes documents, proofs and `pin.json` to `data/demo/`. It publishes a root, so the terminal it runs in needs the ledger token too. It also creates an account named `demo` and prints its random password once; sign in to the pages with that.
+About older data: a database from before batches had owners is upgraded in place when the registry starts. One created before records were salted is refused at startup with a message saying so, and needs the fresh start above.
+
+**1. Seed.** Registers four sample documents, seals them into a batch, leaves a fifth waiting on the Register page, and writes documents, proofs and `pin.json` to `data/demo/`. It publishes a root, so the terminal it runs in needs the ledger token too. It also creates an account named `demo`, which owns and seals the sample batch, and prints its random password once; sign in to the pages with that.
 
 ```powershell
 $env:PROOFCHAIN_LEDGER_TOKEN = "<the token>"
@@ -155,6 +186,8 @@ python scripts/tamper.py restore
 ```powershell
 pytest
 ```
+
+697 tests. They cover the core rules against the brief's worked examples, each verifier result code, the ledger service, the registry and its audit, salted leaves, sign-in and the ledger token, batches per custodian, the AI helper against a simulated API, and the rule that the core and the verifier import nothing from the registry or the AI helper.
 
 The end-to-end tests start a real ledger on a spare port and run the demo scripts and the verifier as separate processes. Two of them run the browser verifier's rules under Node.js and compare its verdicts with the Python verifier's; they are skipped if Node.js is not installed.
 
