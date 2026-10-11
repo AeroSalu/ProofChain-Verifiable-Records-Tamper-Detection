@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Current state
 
-Stage 1 (the core library) is implemented and tested: `proofchain/core/` with `tests/test_canonical.py`, `test_merkle.py`, `test_proof.py` and the format part of `test_ledger.py`. Everything else under `proofchain/`, `scripts/`, `tests/` and `web-verifier/`, plus `README.md`, is still an empty file. Update this file as that changes.
+Stages 1 and 2 are implemented and tested: `proofchain/core/` and `proofchain/verifier/`, with `tests/test_canonical.py`, `test_merkle.py`, `test_proof.py`, `test_verifier.py`, `test_isolation.py` and the format part of `test_ledger.py`. Everything else under `proofchain/`, `scripts/`, `tests/` and `web-verifier/`, plus `README.md`, is still an empty file. Update this file as that changes.
 
 `tests/vectors/examples.json` holds the brief's worked examples (hashes, trees, paths, a three-entry ledger chain) and is exposed as the `vectors` fixture. New code must keep reproducing them.
 
@@ -20,7 +20,7 @@ The threat model assumes an insider with full read and write access to the regis
 
 ## Commands
 
-Setup and `pytest` work now. The service and verifier commands are the ones planned in the brief and do not work until those stages are written.
+Setup, `pytest` and the verifier CLI work now. The two service commands are the ones planned in the brief and do not work until those stages are written.
 
 ```powershell
 python -m venv .venv
@@ -41,7 +41,9 @@ pytest tests/test_merkle.py
 pytest tests/test_merkle.py::test_name
 ```
 
-`--ledger` must also accept a local copy of the ledger file so verification works offline. Python 3.11+ is required. No linter or formatter has been chosen.
+`--ledger` takes the ledger URL or a local ledger file, so verification works offline. A ledger file needs `--pubkey <hex>` or `--pin-file`; with a URL and neither, the key is fetched from the ledger and a warning is printed. `pin --out FILE` saves the checkpoint together with the public key, and `verify --pin-file FILE` uses both. `--json` prints the result as JSON. Exit codes: 0 verified, 1 verification failed, 2 inputs could not be read (not a verdict).
+
+Python 3.11+ is required. No linter or formatter has been chosen.
 
 ## Architecture
 
@@ -89,6 +91,17 @@ All five checks run every time; the verifier does not stop at the first failure.
 | `BATCH_NOT_PUBLISHED` | The ledger has no entry for the bundle's batch id |
 | `ROOT_MISMATCH` | The bundle's root or tree size differs from the ledger entry |
 | `LEDGER_INVALID` | Broken `prev_hash` link, wrong entry hash or signature, or pinned checkpoint missing |
+
+If the proof bundle is malformed or not JSON, the fingerprint, publication and root checks are reported as skipped, the result is `PROOF_INVALID`, and the ledger check still runs. `verifier/verify.py` does no file or network access; `verifier/cli.py` does all of it.
+
+### Interface the ledger service (stage 3) must follow
+
+The verifier already depends on these:
+
+- Signature: Ed25519 over the 32 raw bytes of `entry_hash`, stored as base64 in `signature`.
+- Public key: 32 raw bytes, written as 64 hex characters.
+- `GET /entries` returns a JSON list of entries in order; `GET /pubkey` returns `{"public_key": "<hex>"}`.
+- Ledger file: one JSON entry per line.
 
 Registry self-audit codes: `STORED_CONTENT_CHANGED`, `STORED_FINGERPRINT_CHANGED`, `BATCH_ROOT_DIVERGED`.
 
