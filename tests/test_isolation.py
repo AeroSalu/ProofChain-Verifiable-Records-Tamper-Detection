@@ -64,6 +64,14 @@ def test_no_import_of_registry_or_ai(path):
     assert not reached, f"{path.name} imports {sorted(reached)}"
 
 
+@pytest.mark.parametrize("path", source_files("ledger"), ids=lambda p: p.relative_to(PACKAGE).as_posix())
+def test_ledger_does_not_import_registry_or_ai(path):
+    # The ledger is a web service, so fastapi is expected here; the registry and AI are not.
+    reached = {m for m in imported_modules(path)
+               for bad in ("proofchain.registry", "proofchain.ai", "anthropic") if within(m, bad)}
+    assert not reached, f"{path.name} imports {sorted(reached)}"
+
+
 @pytest.mark.parametrize(
     "package, path",
     [(package, path) for package in ALLOWED for path in source_files(package)],

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Current state
 
-Stages 1 and 2 are implemented and tested: `proofchain/core/` and `proofchain/verifier/`, with `tests/test_canonical.py`, `test_merkle.py`, `test_proof.py`, `test_verifier.py`, `test_isolation.py` and the format part of `test_ledger.py`. Everything else under `proofchain/`, `scripts/`, `tests/` and `web-verifier/`, plus `README.md`, is still an empty file. Update this file as that changes.
+Stages 1 to 3 are implemented and tested: `proofchain/core/`, `proofchain/verifier/` and `proofchain/ledger/`, with `tests/test_canonical.py`, `test_merkle.py`, `test_proof.py`, `test_verifier.py`, `test_isolation.py` and `test_ledger.py`. Stage 4 (registry, audit, web UI) is next. `proofchain/registry/`, `proofchain/ai/`, `scripts/`, `web-verifier/`, the remaining test files and `README.md` are still empty files. Update this file as that changes.
 
 `tests/vectors/examples.json` holds the brief's worked examples (hashes, trees, paths, a three-entry ledger chain) and is exposed as the `vectors` fixture. New code must keep reproducing them.
 
@@ -20,7 +20,7 @@ The threat model assumes an insider with full read and write access to the regis
 
 ## Commands
 
-Setup, `pytest` and the verifier CLI work now. The two service commands are the ones planned in the brief and do not work until those stages are written.
+Setup, `pytest`, the verifier CLI and the ledger service work now. The registry service command is the one planned in the brief and does not work until stage 4 is written.
 
 ```powershell
 python -m venv .venv
@@ -94,14 +94,21 @@ All five checks run every time; the verifier does not stop at the first failure.
 
 If the proof bundle is malformed or not JSON, the fingerprint, publication and root checks are reported as skipped, the result is `PROOF_INVALID`, and the ledger check still runs. `verifier/verify.py` does no file or network access; `verifier/cli.py` does all of it.
 
-### Interface the ledger service (stage 3) must follow
+### Ledger service
 
-The verifier already depends on these:
+The verifier and the ledger agree on these, so change them together:
 
 - Signature: Ed25519 over the 32 raw bytes of `entry_hash`, stored as base64 in `signature`.
 - Public key: 32 raw bytes, written as 64 hex characters.
-- `GET /entries` returns a JSON list of entries in order; `GET /pubkey` returns `{"public_key": "<hex>"}`.
+- `GET /entries` returns a JSON list of entries in order; `GET /pubkey` returns `{"public_key": "<hex>"}`; `GET /head` returns `{"seq", "entry_hash"}` or 404 when empty.
 - Ledger file: one JSON entry per line.
+
+Behaviour:
+
+- `POST /entries` takes `batch_id`, `root`, `tree_size` only. The service sets `seq`, `published_at`, `prev_hash`, `entry_hash` and `signature`. A second POST for the same batch id returns 409. It has no authentication.
+- The whole chain and every signature are checked at startup. A damaged file, or one signed by a different key, raises `LedgerCorrupt` and the service does not start.
+- A file with its last entries removed is still a sound chain, so the ledger does not notice truncation. Only a verifier holding a pin for a removed entry does.
+- Importing `ledger/app.py` opens no files. Tests build their own instance with `create_app(ledger_path, key_path)` inside `with TestClient(...)` so startup runs. Without arguments the paths come from `PROOFCHAIN_LEDGER_PATH` and `PROOFCHAIN_LEDGER_KEY_PATH`, defaulting to `data/`.
 
 Registry self-audit codes: `STORED_CONTENT_CHANGED`, `STORED_FINGERPRINT_CHANGED`, `BATCH_ROOT_DIVERGED`.
 
