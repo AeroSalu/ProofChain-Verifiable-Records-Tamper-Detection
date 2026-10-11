@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Audit{% endblock %}
+{% macro state(finding) %}<span class="tag {{ finding.state }}">{% if finding.code %}{{ finding.code }}{% elif finding.state == 'ok' %}{{ 'not published yet' if finding.label == 'open' else 'matches' }}{% else %}not confirmed{% endif %}</span>{% endmacro %}
+{% macro hashes(finding) %}
+  {% if finding.state != 'ok' and finding.computed != finding.expected %}
+  <div class="hashes"><span>found</span><code>{{ finding.computed or 'could not be computed' }}</code>
+    <span>expected</span><code>{{ finding.expected or 'unknown' }}</code></div>
+  {% endif %}
+{% endmacro %}
+{% block content %}
+<h1>Audit</h1>
+<p class="lead">The registry recomputes every fingerprint from stored content, rebuilds every batch root, and compares them with what the ledger published. The ledger is the reference; this database is what is being checked.</p>
+
+{% if report.ok %}
+<p class="banner good" role="status">Everything stored here matches its published reference.</p>
+{% else %}
+<p class="banner bad" role="alert">The stored data does not fully match the ledger.{% if report.codes %} Found: {{ report.codes | unique | join(', ') }}.{% endif %}</p>
+{% endif %}
+
+<section class="card">
+  <h2>Ledger <span class="tag {{ report.ledger_state }}">{% if report.ledger_state == 'ok' %}sound{% elif report.ledger_state == 'problem' %}LEDGER_INVALID{% else %}not read{% endif %}</span></h2>
+  <p>{{ report.ledger_detail }}</p>
+  {% if report.ledger_problems %}
+  <ul>{% for problem in report.ledger_problems %}<li>{{ problem }}</li>{% endfor %}</ul>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>Batches</h2>
+  {% if not report.batches %}<p class="muted">There are no batches yet.</p>{% else %}
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Batch</th><th>Result</th><th>What was found</th></tr></thead>
+      <tbody>
+        {% for finding in report.batches %}
+        <tr><td>{{ finding.subject }}</td><td>{{ state(finding) }}</td><td>{{ finding.detail | sentence }}{{ hashes(finding) }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>Records</h2>
+  {% if not report.records %}<p class="muted">There are no records yet.</p>{% else %}
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Record</th><th>Document</th><th>Result</th><th>What was found</th></tr></thead>
+      <tbody>
+        {% for finding in report.records %}
+        <tr><td>{{ finding.subject }}</td><td>{{ finding.label }}</td><td>{{ state(finding) }}</td><td>{{ finding.detail | sentence }}{{ hashes(finding) }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</section>
+{% endblock %}

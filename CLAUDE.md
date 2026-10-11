@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Current state
 
-Stages 1 to 3 are implemented and tested: `proofchain/core/`, `proofchain/verifier/` and `proofchain/ledger/`, with `tests/test_canonical.py`, `test_merkle.py`, `test_proof.py`, `test_verifier.py`, `test_isolation.py` and `test_ledger.py`. Stage 4 (registry, audit, web UI) is next. `proofchain/registry/`, `proofchain/ai/`, `scripts/`, `web-verifier/`, the remaining test files and `README.md` are still empty files. Update this file as that changes.
+Stages 1 to 4 are implemented and tested: `proofchain/core/`, `proofchain/verifier/`, `proofchain/ledger/` and `proofchain/registry/` (service, audit and pages). Stage 5 (the AI helper) is next. `proofchain/ai/`, `scripts/`, `web-verifier/`, `tests/test_ai_independence.py`, `tests/test_end_to_end.py` and `README.md` are still empty files. Update this file as that changes.
 
 `tests/vectors/examples.json` holds the brief's worked examples (hashes, trees, paths, a three-entry ledger chain) and is exposed as the `vectors` fixture. New code must keep reproducing them.
 
@@ -20,7 +20,7 @@ The threat model assumes an insider with full read and write access to the regis
 
 ## Commands
 
-Setup, `pytest`, the verifier CLI and the ledger service work now. The registry service command is the one planned in the brief and does not work until stage 4 is written.
+Setup, `pytest`, the verifier CLI and both services work now. Start the ledger before sealing a batch; the registry finds it at `PROOFCHAIN_LEDGER_URL` (default `http://localhost:8001`).
 
 ```powershell
 python -m venv .venv
@@ -54,7 +54,7 @@ Four components, separated so that the registry (the thing being checked) has no
 | `proofchain/core` | Python standard library only | Canonical forms, fingerprint, Merkle tree, proof format, ledger entry format |
 | `proofchain/verifier` | `core`, plus `cryptography` for Ed25519 checks | The five checks and the CLI |
 | `proofchain/ledger` | `core` | FastAPI service on 8001, JSONL hash chain, its own Ed25519 key |
-| `proofchain/registry` | `core`, `ai`; reaches the ledger over HTTP only | FastAPI service on 8000, SQLite, server-rendered pages, self-audit |
+| `proofchain/registry` | `core`, `verifier`, `ai`; reaches the ledger over HTTP only | FastAPI service on 8000, SQLite, server-rendered pages, self-audit |
 | `proofchain/ai` | not imported by `core` or `verifier` | Metadata suggestions and plain-language explanations |
 
 `web-verifier/index.html` sits outside the package on purpose: it is a second, independent implementation of the verification rules using WebCrypto, with no backend.
@@ -110,7 +110,22 @@ Behaviour:
 - A file with its last entries removed is still a sound chain, so the ledger does not notice truncation. Only a verifier holding a pin for a removed entry does.
 - Importing `ledger/app.py` opens no files. Tests build their own instance with `create_app(ledger_path, key_path)` inside `with TestClient(...)` so startup runs. Without arguments the paths come from `PROOFCHAIN_LEDGER_PATH` and `PROOFCHAIN_LEDGER_KEY_PATH`, defaulting to `data/`.
 
-Registry self-audit codes: `STORED_CONTENT_CHANGED`, `STORED_FINGERPRINT_CHANGED`, `BATCH_ROOT_DIVERGED`.
+### Registry service
+
+- The registry imports the verifier: its Verify page and the audit's ledger check call the same `verify` and `ledger_problems` as the CLI. The reverse is still forbidden, and the registry never imports `proofchain.ledger`; `ledger_client.py` is its only route to the ledger.
+- The Verify page is a convenience, not an independent check: it takes the ledger key and checkpoint from the registry's own database, and says so.
+- Tables are `records`, `batches` and `meta`. Beyond the brief: `batches.ledger_entry_hash`, and `meta` holds the ledger public key seen at the first seal. Together they are the registry's own checkpoint, used by the audit. They live in the database an insider controls, so they catch a ledger-side rewrite, not one where the insider edits them as well.
+- There is no login. Confirming requires a "Confirmed by" name, stored with the record. `batching.confirm_record` is the only place metadata is written.
+- `create_app(db_path, ledger, suggest, explain)`: `suggest(filename, content) -> dict` and `explain(result) -> str` are the AI hooks and default to none. A hook that raises is ignored. Stage 5 plugs in here.
+- Sealing publishes the root to the ledger first, then marks the batch sealed. If the ledger already holds the same root for that batch, the seal adopts it; if it holds a different one, the seal is refused with 409.
+- Form posts redirect (303) on success. Errors render a page with a real status code: 404, 409, 413, 422, 502.
+- `GET /records/{id}/document` downloads the stored document alongside its proof.
+
+Self-audit codes: `STORED_CONTENT_CHANGED`, `STORED_FINGERPRINT_CHANGED`, `BATCH_ROOT_DIVERGED`. When content and fingerprint are rewritten consistently, the audit flags the batch and marks its records "not confirmed"; it cannot say which record changed, because the ledger holds only the root.
+
+### Tests for the services
+
+`tests/conftest.py` provides `ledger` (a real ledger app in-process behind the registry's client interface; set `ledger.down = True` to simulate an outage), `db_path` and `registry`. `tests/helpers.py` has `upload`, `confirm`, `seal`, `sealed_batch`, and `query`/`execute` for editing SQLite directly, which is how tamper tests act as an insider.
 
 ## Build order
 
@@ -123,6 +138,6 @@ A pass proves that a document matches a reference registered at a known point in
 ## Repository notes
 
 - Remote: `AeroSalu/ProofChain-Verifiable-Records-Tamper-Detection` (public). Branches: `main` and `dev`.
-- `data/` holds the runtime SQLite database, ledger JSONL file and ledger key. Its contents are git-ignored. The paths come from `PROOFCHAIN_DB_PATH`, `PROOFCHAIN_LEDGER_PATH` and `PROOFCHAIN_LEDGER_KEY_PATH` (see `.env.example`); nothing reads them yet.
+- `data/` holds the runtime SQLite database, ledger JSONL file and ledger key. Its contents are git-ignored. The paths come from `PROOFCHAIN_DB_PATH`, `PROOFCHAIN_LEDGER_PATH` and `PROOFCHAIN_LEDGER_KEY_PATH` (see `.env.example`). Nothing loads `.env` automatically; these are read from the process environment.
 - Work happens on `dev`.
 - No public blockchain, tokens or smart contracts: they are explicitly out of scope.

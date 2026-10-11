@@ -72,6 +72,13 @@ def test_ledger_does_not_import_registry_or_ai(path):
     assert not reached, f"{path.name} imports {sorted(reached)}"
 
 
+@pytest.mark.parametrize("path", source_files("registry"), ids=lambda p: p.relative_to(PACKAGE).as_posix())
+def test_registry_reaches_the_ledger_over_http_only(path):
+    # The registry may use core and the verifier, but never the ledger's code, file or key.
+    reached = {m for m in imported_modules(path) if within(m, "proofchain.ledger")}
+    assert not reached, f"{path.name} imports {sorted(reached)}"
+
+
 @pytest.mark.parametrize(
     "package, path",
     [(package, path) for package in ALLOWED for path in source_files(package)],

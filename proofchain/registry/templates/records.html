@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Records and batches{% endblock %}
+{% block content %}
+<h1>Records and batches</h1>
+<p class="lead">Confirmed records collect in the open batch. Sealing a batch builds its Merkle tree and publishes the root to the ledger. After that the batch cannot change, and each record has a proof to download.</p>
+
+{% if not batches %}
+<p class="muted">There are no batches yet. Confirm a record on the Register page to start one.</p>
+{% endif %}
+
+{% for batch in batches %}
+<section class="card">
+  <div class="split">
+    <h2>{{ batch.id }} <span class="tag {{ batch.status }}">{{ batch.status }}</span></h2>
+    {% if batch.status == 'open' %}
+    <form method="post" action="/batches/{{ batch.id }}/seal">
+      <button type="submit" {% if not batch.records %}disabled{% endif %}>Seal batch and publish root</button>
+    </form>
+    {% endif %}
+  </div>
+  {% if batch.status == 'sealed' %}
+  <dl class="facts">
+    <dt>Published root</dt><dd><code>{{ batch.root }}</code></dd>
+    <dt>Records</dt><dd>{{ batch.tree_size }}</dd>
+    <dt>Ledger entry</dt><dd>{{ batch.ledger_seq }}, published {{ batch.sealed_at }}</dd>
+  </dl>
+  {% endif %}
+  <div class="scroll">
+    <table>
+      <thead>
+        <tr><th>Leaf</th><th>Document</th><th>Fingerprint</th><th>Details</th><th>Confirmed by</th>
+          {% if batch.status == 'sealed' %}<th>Download</th>{% endif %}</tr>
+      </thead>
+      <tbody>
+        {% for record in batch.records %}
+        <tr>
+          <td>{{ record.leaf_index }}</td>
+          <td>{{ record.filename }}</td>
+          <td><code title="{{ record.fingerprint }}">{{ record.fingerprint | short }}</code></td>
+          <td>{{ record.metadata.issuer }} · {{ record.metadata.document_type }}{% if record.metadata.date %} · {{ record.metadata.date }}{% endif %}{% if record.metadata.category %} · {{ record.metadata.category }}{% endif %}</td>
+          <td>{{ record.confirmed_by }}</td>
+          {% if batch.status == 'sealed' %}
+          <td class="nowrap"><a href="/records/{{ record.id }}/document">document</a> · <a href="/records/{{ record.id }}/proof">proof</a></td>
+          {% endif %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endfor %}
+{% endblock %}

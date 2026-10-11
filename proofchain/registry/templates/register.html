@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Register{% endblock %}
+{% block content %}
+<h1>Register a document</h1>
+<p class="lead">Uploading a document fingerprints it. It joins a batch only after a person has checked its details and confirmed them.</p>
+
+<form class="card" method="post" action="/records" enctype="multipart/form-data">
+  <div class="fields">
+    <label>Document
+      <input type="file" name="file" required data-fingerprint-input>
+    </label>
+    <label>Canonical form
+      <select name="canon" data-fingerprint-canon>
+        <option value="raw-bytes-v1">Exact file bytes (raw-bytes-v1)</option>
+        <option value="json-sorted-v1">Structured JSON record (json-sorted-v1)</option>
+      </select>
+    </label>
+  </div>
+  <p class="hash-line">SHA-256 fingerprint <output data-fingerprint-output>choose a file to see it</output></p>
+  <button type="submit">Upload and fingerprint</button>
+</form>
+
+<h2>Waiting for confirmation</h2>
+{% if not pending %}
+<p class="muted">No records are waiting.</p>
+{% endif %}
+{% for record in pending %}
+<form class="card" id="record-{{ record.id }}" method="post" action="/records/{{ record.id }}/confirm">
+  <h3>{{ record.filename }}</h3>
+  <p class="hash-line">Fingerprint <code>{{ record.fingerprint }}</code> <span class="tag">{{ record.canon }}</span></p>
+  {% if record.suggested_metadata %}
+  <p class="muted">The suggestions below were produced automatically. Check each one against the document before using it.</p>
+  {% else %}
+  <p class="muted">There are no suggestions for this record. Enter the details from the document.</p>
+  {% endif %}
+  <div class="fields">
+    {% for name, label in fields %}
+    <label>{{ label }}{% if name not in required %} <span class="muted">(optional)</span>{% endif %}
+      <input name="{{ name }}" id="r{{ record.id }}-{{ name }}" {% if name in required %}required{% endif %}
+             {% if name == 'date' %}placeholder="YYYY-MM-DD"{% endif %}>
+      {% set hint = record.suggested_metadata.get(name) %}
+      {% if hint %}
+      <span class="hint">Suggested: {{ hint }}
+        <button type="button" class="link" data-fill="r{{ record.id }}-{{ name }}" data-value="{{ hint }}">use</button>
+      </span>
+      {% endif %}
+    </label>
+    {% endfor %}
+  </div>
+  <label class="narrow">Confirmed by
+    <input name="confirmed_by" required placeholder="Your name">
+  </label>
+  <button type="submit">Confirm and add to the open batch</button>
+</form>
+{% endfor %}
+{% endblock %}

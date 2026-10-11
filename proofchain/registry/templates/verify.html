@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Verify{% endblock %}
+{% block content %}
+<h1>Verify a document</h1>
+<p class="lead">Give the document and its proof bundle. Five checks are run against the ledger, and each one shows the hashes it computed. The registry's stored records and fingerprints are not consulted.</p>
+
+<form class="card" method="post" action="/verify" enctype="multipart/form-data">
+  <div class="fields">
+    <label>Document <input type="file" name="document" required></label>
+    <label>Proof bundle (.proof.json) <input type="file" name="proof" required></label>
+  </div>
+  <button type="submit">Run the five checks</button>
+</form>
+
+{% if result %}
+{% if result.ok %}
+<p class="banner good" role="status"><strong>Verified.</strong> {{ document_name }} matches the record registered in {{ result.batch_id }} (ledger entry {{ result.ledger_seq }}).</p>
+{% else %}
+<p class="banner bad" role="alert"><strong>Not verified.</strong> {{ document_name }} failed: {{ result.codes | join(', ') }}.</p>
+{% endif %}
+
+<section class="card">
+  <h2>Checks</h2>
+  <ol class="checks">
+    {% for check in result.checks %}
+    <li>
+      <div class="split">
+        <strong>{{ check.name }}</strong>
+        <span class="tag {{ check.status }}">{% if check.status == 'fail' %}{{ check.code }}{% elif check.status == 'pass' %}passed{% else %}not run{% endif %}</span>
+      </div>
+      <p>{{ check.detail | sentence }}</p>
+      {% if check.computed or check.expected %}
+      <div class="hashes"><span>computed</span><code>{{ check.computed or 'could not be computed' }}</code>
+        <span>expected</span><code>{{ check.expected or 'unknown' }}</code></div>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ol>
+</section>
+
+{% if explanation %}
+<section class="card">
+  <h2>In plain language <span class="tag">written by AI</span></h2>
+  <p>{{ explanation }}</p>
+  <p class="muted">This explanation was written after the checks finished. It describes the result above and has no part in it.</p>
+</section>
+{% endif %}
+
+<p class="muted">A pass means the document is identical to one registered at that point in the ledger. It does not prove who created the document or that its contents are true. This page is run by the registry; for an independent check, use the command-line verifier with a checkpoint you pinned yourself.</p>
+{% endif %}
+{% endblock %}
