@@ -1,0 +1,629 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ProofChain verifier</title>
+<style>
+  :root {
+    --ink: #1f2a44; --muted: #5b6577; --line: #d5dbe5; --page: #f3f5f8; --paper: #ffffff;
+    --teal: #0f766e; --teal-soft: #e0f1ee; --red: #b42318; --red-soft: #fdecea;
+    --amber: #92400e; --amber-soft: #fcebcf; --mono: Consolas, "Cascadia Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 16px/1.55 "Segoe UI", system-ui, sans-serif; color: var(--ink); background: var(--page); }
+  header { padding: 14px 20px; background: var(--ink); color: #fff; }
+  header strong { font-size: 1.15rem; }
+  header span { opacity: .7; }
+  main { max-width: 900px; margin: 0 auto; padding: 24px 16px 40px; }
+  h1 { font-size: 1.7rem; margin: 8px 0 4px; }
+  h2 { font-size: 1.15rem; margin: 0 0 10px; }
+  .lead { max-width: 70ch; margin: 0 0 20px; }
+  .muted { color: var(--muted); }
+  .card { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; margin: 0 0 16px; }
+  .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px 18px; align-items: end; }
+  label { display: block; font-weight: 600; font-size: .92rem; }
+  label small { display: block; font-weight: 400; color: var(--muted); }
+  input { display: block; width: 100%; margin-top: 4px; padding: 8px 10px; font: inherit; color: inherit;
+    background: var(--paper); border: 1px solid #aab4c3; border-radius: 6px; }
+  input:focus-visible, button:focus-visible { outline: 3px solid #5eb3aa; outline-offset: 2px; }
+  button { font: inherit; font-weight: 600; color: #fff; background: var(--teal); border: 0; border-radius: 6px;
+    padding: 10px 18px; cursor: pointer; margin-top: 16px; }
+  button:hover { background: #0b5d57; }
+  code { font-family: var(--mono); font-size: .86rem; overflow-wrap: anywhere; }
+  .banner { padding: 12px 16px; border-radius: 8px; margin: 0 0 16px; border-left: 5px solid; }
+  .banner.good { background: var(--teal-soft); border-color: var(--teal); }
+  .banner.bad { background: var(--red-soft); border-color: var(--red); }
+  .banner.note { background: var(--amber-soft); border-color: var(--amber); }
+  ol { margin: 0; padding-left: 22px; }
+  li { padding: 10px 0; border-bottom: 1px solid var(--line); }
+  li:last-child { border-bottom: 0; }
+  li p { margin: 4px 0 0; }
+  .split { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; }
+  .tag { display: inline-block; padding: 1px 9px; border-radius: 999px; font-weight: 600; font-size: .78rem; white-space: nowrap; }
+  .tag.pass { background: var(--teal-soft); color: var(--teal); }
+  .tag.fail { background: var(--red-soft); color: var(--red); font-family: var(--mono); }
+  .tag.skipped { background: var(--amber-soft); color: var(--amber); }
+  .hashes { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin-top: 6px; padding: 8px 10px;
+    background: var(--page); border-radius: 6px; font-size: .86rem; color: var(--muted); }
+  .hashes code { color: var(--ink); }
+</style>
+</head>
+<body>
+<header><strong>ProofChain</strong> <span>independent verifier</span></header>
+<main>
+  <h1>Verify a document</h1>
+  <p class="lead">This page checks a document against a published Merkle root. Everything is computed here in your
+    browser: it sends your files nowhere, uses no ProofChain code or server, and never contacts the registry.</p>
+
+  <form class="card" id="form">
+    <div class="fields">
+      <label>Document
+        <input type="file" id="document" required>
+      </label>
+      <label>Proof bundle <small>the .proof.json file issued with the document</small>
+        <input type="file" id="proof" required>
+      </label>
+      <label>Ledger file <small>a copy of ledger.jsonl, or leave empty and give a URL</small>
+        <input type="file" id="ledger-file">
+      </label>
+      <label>Ledger URL <small>used only if no ledger file is chosen</small>
+        <input type="url" id="ledger-url" placeholder="http://localhost:8001">
+      </label>
+      <label>Pin file <small>optional: pin.json holding a checkpoint and the ledger's public key</small>
+        <input type="file" id="pin-file">
+      </label>
+      <label>Ledger public key <small>64 hex characters; not needed with a pin file</small>
+        <input type="text" id="public-key" autocomplete="off" spellcheck="false">
+      </label>
+    </div>
+    <button type="submit">Run the five checks</button>
+  </form>
+
+  <div id="output" aria-live="polite"></div>
+
+  <p class="muted">A pass means the document is identical to one registered at that point in the ledger. It does not
+    prove who created the document or that its contents are true. Without a pinned checkpoint, a ledger that was
+    rewritten in full and signed again would not be noticed.</p>
+</main>
+
+<script>
+// ==core:start
+// The verification rules, written a second time and independently of the Python code.
+// Nothing in this block touches the page, so it can also be run and tested outside a browser.
+
+const CODES = { DOCUMENT: "DOCUMENT_MODIFIED", PROOF: "PROOF_INVALID", PUBLICATION: "BATCH_NOT_PUBLISHED",
+                ROOT: "ROOT_MISMATCH", LEDGER: "LEDGER_INVALID" };
+const CANONS = ["raw-bytes-v1", "json-sorted-v1"];
+const HEX64 = /^[0-9a-f]{64}$/;
+const TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
+const GENESIS = "0".repeat(64);
+const BODY_FIELDS = ["seq", "batch_id", "root", "tree_size", "published_at", "prev_hash"];
+const PROOF_FIELDS = ["version", "canon", "fingerprint", "batch_id", "leaf_index", "tree_size", "path", "root"];
+
+class Malformed extends Error {}
+
+// ---- bytes and hashes
+
+const toHex = (bytes) => Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+const fromHex = (text) => Uint8Array.from(text.match(/../g) || [], (pair) => parseInt(pair, 16));
+const utf8 = (text) => new TextEncoder().encode(text);
+
+function decodeUtf8(bytes) {
+  // fatal: invalid UTF-8 is an error; ignoreBOM: a byte order mark is kept, and then rejected as not JSON
+  return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
+}
+
+function concat(...parts) {
+  const out = new Uint8Array(parts.reduce((total, part) => total + part.length, 0));
+  let offset = 0;
+  for (const part of parts) { out.set(part, offset); offset += part.length; }
+  return out;
+}
+
+async function sha256(bytes) {
+  return new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+}
+
+// ---- JSON, parsed by hand so that integers stay exact and duplicate keys are seen
+
+class Int { constructor(text) { this.value = BigInt(text); } }
+class Float { constructor(text) { this.text = text; } }
+
+// strict = the json-sorted-v1 rules: no floating-point numbers, no duplicate keys.
+function parseJson(text, strict) {
+  let at = 0;
+  const fail = (what) => { throw new Malformed(`not valid JSON: ${what} at character ${at}`); };
+  const space = () => { while (" \t\n\r".includes(text[at]) && at < text.length) at++; };
+
+  function string() {
+    at++;
+    let out = "";
+    for (;;) {
+      if (at >= text.length) fail("unterminated string");
+      const ch = text[at++];
+      if (ch === '"') return out;
+      if (ch < " ") fail("control character in string");
+      if (ch !== "\\") { out += ch; continue; }
+      const esc = text[at++];
+      const simple = { '"': '"', "\\": "\\", "/": "/", b: "\b", f: "\f", n: "\n", r: "\r", t: "\t" }[esc];
+      if (simple !== undefined) { out += simple; continue; }
+      const digits = text.slice(at, at + 4);
+      if (esc !== "u" || !/^[0-9a-fA-F]{4}$/.test(digits)) fail("bad escape");
+      out += String.fromCharCode(parseInt(digits, 16));
+      at += 4;
+    }
+  }
+
+  function number() {
+    const match = /^-?(?:0|[1-9]\d*)/.exec(text.slice(at));
+    if (!match) fail("unexpected character");
+    const rest = /^(?:\.\d+)?(?:[eE][+-]?\d+)?/.exec(text.slice(at + match[0].length))[0];
+    at += match[0].length + rest.length;
+    if (!rest) return new Int(match[0]);
+    if (strict) throw new Malformed(`floating-point numbers are not allowed: ${match[0]}${rest}`);
+    return new Float(match[0] + rest);
+  }
+
+  function value() {
+    space();
+    const ch = text[at];
+    if (ch === '"') return string();
+    if (ch === "{") {
+      at++;
+      const object = new Map();
+      space();
+      if (text[at] === "}") { at++; return object; }
+      for (;;) {
+        space();
+        if (text[at] !== '"') fail("expected a key");
+        const key = string();
+        space();
+        if (text[at++] !== ":") fail("expected ':'");
+        const item = value();
+        if (strict && object.has(key)) throw new Malformed(`duplicate object key: ${JSON.stringify(key)}`);
+        object.set(key, item);
+        space();
+        if (text[at] === ",") { at++; continue; }
+        if (text[at] === "}") { at++; return object; }
+        fail("expected ',' or '}'");
+      }
+    }
+    if (ch === "[") {
+      at++;
+      const list = [];
+      space();
+      if (text[at] === "]") { at++; return list; }
+      for (;;) {
+        list.push(value());
+        space();
+        if (text[at] === ",") { at++; continue; }
+        if (text[at] === "]") { at++; return list; }
+        fail("expected ',' or ']'");
+      }
+    }
+    for (const [word, result] of [["true", true], ["false", false], ["null", null]]) {
+      if (text.startsWith(word, at)) { at += word.length; return result; }
+    }
+    for (const word of ["NaN", "Infinity", "-Infinity"]) {
+      if (text.startsWith(word, at)) {
+        if (strict) throw new Malformed(`${word} is not valid JSON`);
+        at += word.length;
+        return new Float(word);
+      }
+    }
+    return number();
+  }
+
+  const result = value();
+  space();
+  if (at < text.length) fail("unexpected text after the value");
+  return result;
+}
+
+// ---- canonical forms
+
+function compareCodePoints(a, b) {
+  // Order by code point, as Python orders strings (JavaScript's default order is by UTF-16 unit).
+  let i = 0, j = 0;
+  while (i < a.length && j < b.length) {
+    const x = a.codePointAt(i), y = b.codePointAt(j);
+    if (x !== y) return x - y;
+    i += x > 0xffff ? 2 : 1;
+    j += y > 0xffff ? 2 : 1;
+  }
+  return (a.length - i) - (b.length - j);
+}
+
+function normalised(text) {
+  if (!text.isWellFormed()) throw new Malformed("text contains characters that cannot be encoded as UTF-8");
+  return text.normalize("NFC");
+}
+
+function canonicalJson(value) {
+  if (value === null || value === true || value === false) return String(value);
+  if (value instanceof Int) return value.value.toString();
+  if (value instanceof Float) throw new Malformed("floating-point numbers are not allowed; use integers or strings");
+  if (typeof value === "string") return JSON.stringify(normalised(value));
+  if (Array.isArray(value)) return "[" + value.map(canonicalJson).join(",") + "]";
+  const members = new Map();
+  for (const [key, item] of value) {
+    const name = normalised(key);
+    if (members.has(name)) throw new Malformed(`duplicate object key after normalisation: ${JSON.stringify(name)}`);
+    members.set(name, item);
+  }
+  const keys = [...members.keys()].sort(compareCodePoints);
+  return "{" + keys.map((key) => JSON.stringify(key) + ":" + canonicalJson(members.get(key))).join(",") + "}";
+}
+
+function canonicalize(canon, bytes) {
+  if (canon === "raw-bytes-v1") return bytes;
+  if (canon === "json-sorted-v1") {
+    let text;
+    try { text = decodeUtf8(bytes); } catch { throw new Malformed("structured records must be UTF-8"); }
+    return utf8(canonicalJson(parseJson(text, true)));
+  }
+  throw new Malformed(`unknown canonical form: ${canon}`);
+}
+
+// ---- Merkle tree
+
+const leafHash = (fingerprint) => sha256(concat(Uint8Array.of(0), fingerprint));
+const nodeHash = (left, right) => sha256(concat(Uint8Array.of(1), left, right));
+
+function expectedSides(index, treeSize) {
+  // The shape of a path is fixed by the leaf's position, so a proof cannot claim a place it does not have.
+  const sides = [];
+  let width = treeSize;
+  while (width > 1n) {
+    const sibling = index ^ 1n;
+    if (sibling < width) sides.push(sibling < index ? "left" : "right");
+    index >>= 1n;
+    width = (width + 1n) >> 1n;
+  }
+  return sides;
+}
+
+async function foldPath(fingerprint, path) {
+  let current = await leafHash(fingerprint);
+  for (const step of path) {
+    current = step.side === "left" ? await nodeHash(step.hash, current) : await nodeHash(current, step.hash);
+  }
+  return current;
+}
+
+// ---- proof bundle
+
+const isHex64 = (value) => typeof value === "string" && HEX64.test(value);
+
+function readBundle(data) {
+  if (!(data instanceof Map)) throw new Malformed("bundle must be a JSON object");
+  const missing = PROOF_FIELDS.filter((name) => !data.has(name));
+  if (missing.length) throw new Malformed(`bundle is missing: ${missing.join(", ")}`);
+  const unknown = [...data.keys()].filter((name) => !PROOF_FIELDS.includes(name)).sort();
+  if (unknown.length) throw new Malformed(`bundle has unknown fields: ${unknown.join(", ")}`);
+
+  const integer = (name) => {
+    if (!(data.get(name) instanceof Int)) throw new Malformed(`${name} must be an integer`);
+    return data.get(name).value;
+  };
+  const hex64 = (value, name) => {
+    if (!isHex64(value)) throw new Malformed(`${name} must be 64 lowercase hex characters`);
+    return value;
+  };
+
+  if (integer("version") !== 1n) throw new Malformed(`unsupported bundle version: ${data.get("version").value}`);
+  if (!CANONS.includes(data.get("canon"))) throw new Malformed("unknown canonical form");
+  const batchId = data.get("batch_id");
+  if (typeof batchId !== "string" || !batchId) throw new Malformed("batch_id must be a non-empty string");
+  const treeSize = integer("tree_size"), leafIndex = integer("leaf_index");
+  if (treeSize < 1n) throw new Malformed("tree_size must be at least 1");
+  if (leafIndex < 0n || leafIndex >= treeSize) {
+    throw new Malformed(`leaf_index ${leafIndex} is outside a tree of ${treeSize} leaves`);
+  }
+  if (!Array.isArray(data.get("path"))) throw new Malformed("path must be a list");
+  const path = data.get("path").map((step, i) => {
+    const wellFormed = step instanceof Map && step.size === 2 && step.has("side") && step.has("hash");
+    if (!wellFormed) throw new Malformed(`path step ${i + 1} must have exactly 'side' and 'hash'`);
+    return { side: step.get("side"), hash: fromHex(hex64(step.get("hash"), `path step ${i + 1} hash`)) };
+  });
+  const sides = expectedSides(leafIndex, treeSize);
+  if (path.length !== sides.length) {
+    throw new Malformed(`path has ${path.length} steps; leaf ${leafIndex} of ${treeSize} needs ${sides.length}`);
+  }
+  path.forEach((step, i) => {
+    if (step.side !== sides[i]) throw new Malformed(`path step ${i + 1} is on the wrong side for leaf ${leafIndex} of ${treeSize}`);
+  });
+  return { canon: data.get("canon"), fingerprint: hex64(data.get("fingerprint"), "fingerprint"), batchId,
+           leafIndex, treeSize, path, root: hex64(data.get("root"), "root") };
+}
+
+// ---- ledger
+
+function entryProblem(entry) {
+  if (!(entry instanceof Map)) return "entry must be a JSON object";
+  const missing = BODY_FIELDS.filter((name) => !entry.has(name));
+  if (missing.length) return `entry is missing: ${missing.join(", ")}`;
+  const get = (name) => entry.get(name);
+  if (!(get("seq") instanceof Int) || get("seq").value < 0n) return "seq must be a non-negative integer";
+  if (typeof get("batch_id") !== "string" || !get("batch_id")) return "batch_id must be a non-empty string";
+  if (!isHex64(get("root"))) return "root must be 64 lowercase hex characters";
+  if (!(get("tree_size") instanceof Int) || get("tree_size").value < 1n) return "tree_size must be a positive integer";
+  if (typeof get("published_at") !== "string" || !TIMESTAMP.test(get("published_at"))) {
+    return "published_at must look like 2026-10-12T09:00:00Z";
+  }
+  if (!isHex64(get("prev_hash"))) return "prev_hash must be 64 lowercase hex characters";
+  if (!isHex64(get("entry_hash"))) return "entry_hash must be 64 lowercase hex characters";
+  if (entry.has("signature") && typeof get("signature") !== "string") return "signature must be a string";
+  return null;
+}
+
+async function entryHash(entry) {
+  const body = new Map(BODY_FIELDS.map((name) => [name, entry.get(name)]));
+  return toHex(await sha256(utf8(canonicalJson(body))));
+}
+
+async function chainProblems(entries) {
+  const problems = [];
+  const seen = new Map();
+  let expectedPrev = GENESIS;
+  for (let position = 0; position < entries.length; position++) {
+    const entry = entries[position];
+    const malformed = entryProblem(entry);
+    if (malformed) {
+      problems.push(`entry at position ${position} is malformed: ${malformed}`);
+      expectedPrev = null;
+      continue;
+    }
+    if (entry.get("seq").value !== BigInt(position)) {
+      problems.push(`entry at position ${position} has seq ${entry.get("seq").value}`);
+    }
+    const computed = await entryHash(entry);
+    if (entry.get("entry_hash") !== computed) {
+      problems.push(`entry ${position}: entry_hash is ${entry.get("entry_hash")} but its fields hash to ${computed}`);
+    }
+    if (expectedPrev !== null && entry.get("prev_hash") !== expectedPrev) {
+      problems.push(`entry ${position}: prev_hash is ${entry.get("prev_hash")} but the previous entry_hash is ${expectedPrev}`);
+    }
+    const batch = entry.get("batch_id");
+    if (seen.has(batch)) problems.push(`entry ${position}: batch ${batch} was already published in entry ${seen.get(batch)}`);
+    else seen.set(batch, position);
+    expectedPrev = entry.get("entry_hash");
+  }
+  return problems;
+}
+
+function base64Bytes(text) {
+  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(text)) throw new Malformed("not base64");
+  return Uint8Array.from(atob(text), (ch) => ch.charCodeAt(0));
+}
+
+async function signatureProblems(entries, publicKey) {
+  let key;
+  try {
+    key = await crypto.subtle.importKey("raw", publicKey, { name: "Ed25519" }, false, ["verify"]);
+  } catch (error) {
+    if (error && error.name === "NotSupportedError") return ["this browser cannot check Ed25519 signatures; use a current browser or the command-line verifier"];
+    return ["the ledger public key is not a valid Ed25519 key"];
+  }
+  const problems = [];
+  for (let position = 0; position < entries.length; position++) {
+    const entry = entries[position];
+    if (entryProblem(entry)) continue; // already reported by chainProblems
+    if (!entry.has("signature")) { problems.push(`entry ${position} is not signed`); continue; }
+    let valid = false;
+    try {
+      valid = await crypto.subtle.verify({ name: "Ed25519" }, key, base64Bytes(entry.get("signature")), fromHex(entry.get("entry_hash")));
+    } catch { valid = false; }
+    if (!valid) problems.push(`entry ${position}: signature does not match its entry_hash`);
+  }
+  return problems;
+}
+
+function pinProblems(entries, pin) {
+  if (pin.seq >= entries.length) return [`pinned entry ${pin.seq} is missing: the ledger has only ${entries.length} entries`];
+  const entry = entries[pin.seq];
+  const found = entry instanceof Map ? entry.get("entry_hash") : undefined;
+  if (found !== pin.entry_hash) return [`pinned entry ${pin.seq} has changed: entry_hash is ${found}, pinned ${pin.entry_hash}`];
+  return [];
+}
+
+async function ledgerProblems(entries, publicKey, pin) {
+  const problems = [...await chainProblems(entries), ...await signatureProblems(entries, publicKey)];
+  return pin ? problems.concat(pinProblems(entries, pin)) : problems;
+}
+
+function parseLedgerLines(text) {
+  // One entry per line. A line that is not JSON is kept as text, so the ledger check reports it.
+  return text.split(/\r\n|[\n\r\v\f\x1c-\x1e\x85\u2028\u2029]/).filter((line) => line.trim()).map((line) => {
+    try { return parseJson(line, false); } catch { return line; }
+  });
+}
+
+function parsePin(text) {
+  const match = /^(\d+):([0-9a-f]{64})$/.exec(text.trim());
+  if (!match) throw new Malformed("a pin looks like <seq>:<64 lowercase hex characters>");
+  return { seq: Number(match[1]), entry_hash: match[2] };
+}
+
+// ---- the five checks
+
+const check = (name, code, status, detail, computed = null, expected = null) => ({ name, code, status, detail, computed, expected });
+
+// document: Uint8Array. proofText: the proof file's text, or null if it could not be decoded.
+// entries: the whole ledger in order. publicKey: 32 bytes. pin: { seq, entry_hash } or null.
+async function verifyDocument({ document, proofText, entries, publicKey, pin = null }) {
+  const problems = await ledgerProblems(entries, publicKey, pin);
+  let detail = `${entries.length} entries: chain links, entry hashes and signatures hold`;
+  detail += pin ? `, and pinned entry ${pin.seq} is present` : " (no checkpoint pinned, so a fully rewritten ledger would not be noticed)";
+  const ledgerCheck = problems.length ? check("Ledger check", CODES.LEDGER, "fail", problems.join("; "))
+                                      : check("Ledger check", CODES.LEDGER, "pass", detail);
+  const finish = (checks, batchId = null, ledgerSeq = null) => ({
+    ok: checks.every((c) => c.status === "pass"), codes: checks.filter((c) => c.status === "fail").map((c) => c.code),
+    batch_id: batchId, ledger_seq: ledgerSeq, pinned: pin !== null, checks,
+  });
+
+  let bundle;
+  try {
+    if (proofText === null) throw new Malformed("bundle must be a JSON object");
+    let data;
+    try { data = parseJson(proofText, false); } catch { throw new Malformed("bundle must be a JSON object"); }
+    bundle = readBundle(data);
+  } catch (error) {
+    if (!(error instanceof Malformed)) throw error;
+    const reason = "not run: the proof bundle could not be read";
+    return finish([
+      check("Fingerprint check", CODES.DOCUMENT, "skipped", reason),
+      check("Proof check", CODES.PROOF, "fail", `the proof bundle is malformed: ${error.message}`),
+      check("Publication check", CODES.PUBLICATION, "skipped", reason),
+      check("Root check", CODES.ROOT, "skipped", reason),
+      ledgerCheck,
+    ]);
+  }
+
+  let fingerprintCheck;
+  try {
+    const computed = toHex(await sha256(canonicalize(bundle.canon, document)));
+    fingerprintCheck = computed === bundle.fingerprint
+      ? check("Fingerprint check", CODES.DOCUMENT, "pass", "the document hashes to the fingerprint in the proof", computed, bundle.fingerprint)
+      : check("Fingerprint check", CODES.DOCUMENT, "fail", "the document does not hash to the fingerprint in the proof", computed, bundle.fingerprint);
+  } catch (error) {
+    if (!(error instanceof Malformed)) throw error;
+    fingerprintCheck = check("Fingerprint check", CODES.DOCUMENT, "fail",
+      `the document cannot be put into ${bundle.canon} form: ${error.message}`, null, bundle.fingerprint);
+  }
+
+  const folded = toHex(await foldPath(fromHex(bundle.fingerprint), bundle.path));
+  const proofCheck = folded === bundle.root
+    ? check("Proof check", CODES.PROOF, "pass", "the path leads from the proof's fingerprint to the proof's root", folded, bundle.root)
+    : check("Proof check", CODES.PROOF, "fail", "the path does not lead from the proof's fingerprint to the proof's root", folded, bundle.root);
+
+  const entry = entries.find((e) => !entryProblem(e) && e.get("batch_id") === bundle.batchId) || null;
+  const seq = entry ? Number(entry.get("seq").value) : null;
+  const publicationCheck = entry
+    ? check("Publication check", CODES.PUBLICATION, "pass", `batch ${bundle.batchId} was published in ledger entry ${seq}`)
+    : check("Publication check", CODES.PUBLICATION, "fail", `the ledger has no entry for batch ${bundle.batchId}`);
+
+  let rootCheck;
+  if (!entry) {
+    rootCheck = check("Root check", CODES.ROOT, "skipped", "not run: there is no published root to compare with");
+  } else if (bundle.root !== entry.get("root")) {
+    rootCheck = check("Root check", CODES.ROOT, "fail", "the proof's root is not the root published for this batch", bundle.root, entry.get("root"));
+  } else if (bundle.treeSize !== entry.get("tree_size").value) {
+    rootCheck = check("Root check", CODES.ROOT, "fail",
+      `the proof says the batch has ${bundle.treeSize} records; the ledger says ${entry.get("tree_size").value}`, bundle.root, entry.get("root"));
+  } else {
+    rootCheck = check("Root check", CODES.ROOT, "pass", "the proof's root and tree size equal the published entry", bundle.root, entry.get("root"));
+  }
+
+  return finish([fingerprintCheck, proofCheck, publicationCheck, rootCheck, ledgerCheck], bundle.batchId, seq);
+}
+// ==core:end
+
+// ---- the page
+
+const $ = (id) => document.getElementById(id);
+
+function element(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+async function fileBytes(input) {
+  const file = input.files[0];
+  return file ? new Uint8Array(await file.arrayBuffer()) : null;
+}
+
+async function fetchText(url) {
+  let response;
+  try { response = await fetch(url); } catch { throw new Malformed(`cannot reach ${url}`); }
+  if (!response.ok) throw new Malformed(`${url} answered with HTTP ${response.status}`);
+  return response.text();
+}
+
+// Gathers the inputs. Throws Malformed when something needed is missing: that is "no verdict", not a failure.
+async function gather() {
+  const documentBytes = await fileBytes($("document"));
+  const proofBytes = await fileBytes($("proof"));
+  let proofText = null;
+  try { proofText = decodeUtf8(proofBytes); } catch { /* reported as PROOF_INVALID */ }
+
+  let pin = null, publicKeyHex = $("public-key").value.trim().toLowerCase(), note = null;
+  const pinBytes = await fileBytes($("pin-file"));
+  if (pinBytes) {
+    try {
+      const saved = parseJson(decodeUtf8(pinBytes), false);
+      pin = parsePin(`${saved.get("seq").value}:${saved.get("entry_hash")}`);
+      publicKeyHex = publicKeyHex || saved.get("public_key");
+    } catch { throw new Malformed("the pin file could not be read"); }
+  }
+
+  const url = $("ledger-url").value.trim().replace(/\/+$/, "");
+  const ledgerBytes = await fileBytes($("ledger-file"));
+  let entries;
+  if (ledgerBytes) {
+    try { entries = parseLedgerLines(decodeUtf8(ledgerBytes)); } catch { throw new Malformed("the ledger file is not UTF-8 text"); }
+  } else if (url) {
+    try { entries = parseJson(await fetchText(`${url}/entries`), false); } catch (error) {
+      throw new Malformed(error instanceof Malformed ? error.message : "the ledger did not return its entries");
+    }
+    if (!Array.isArray(entries)) throw new Malformed(`${url}/entries did not return a list`);
+    if (!publicKeyHex) {
+      const reply = parseJson(await fetchText(`${url}/pubkey`), false);
+      publicKeyHex = reply instanceof Map ? reply.get("public_key") : "";
+      note = "The public key was fetched from the ledger itself. A key you obtained earlier, from a pin file or typed in, is stronger evidence.";
+    }
+  } else {
+    throw new Malformed("choose a ledger file or give the ledger's URL");
+  }
+  if (!isHex64(publicKeyHex)) throw new Malformed("the ledger's public key is needed: choose a pin file or enter 64 hex characters");
+  return { document: documentBytes, proofText, entries, publicKey: fromHex(publicKeyHex), pin, note };
+}
+
+function show(result, name, note) {
+  const output = $("output");
+  output.replaceChildren();
+  const banner = element("p", `banner ${result.ok ? "good" : "bad"}`);
+  banner.append(element("strong", "", result.ok ? "Verified. " : "Not verified. "),
+    result.ok ? `${name} matches the record registered in ${result.batch_id} (ledger entry ${result.ledger_seq}).`
+              : `${name} failed: ${result.codes.join(", ")}.`);
+  output.append(banner);
+  if (note) output.append(element("p", "banner note", note));
+
+  const card = element("section", "card");
+  card.append(element("h2", "", "Checks"));
+  const list = element("ol");
+  for (const item of result.checks) {
+    const row = element("li");
+    const head = element("div", "split");
+    head.append(element("strong", "", item.name),
+      element("span", `tag ${item.status}`, item.status === "fail" ? item.code : item.status === "pass" ? "passed" : "not run"));
+    row.append(head, element("p", "", item.detail[0].toUpperCase() + item.detail.slice(1)));
+    if (item.computed || item.expected) {
+      const hashes = element("div", "hashes");
+      hashes.append(element("span", "", "computed"), element("code", "", item.computed || "could not be computed"),
+        element("span", "", "expected"), element("code", "", item.expected || "unknown"));
+      row.append(hashes);
+    }
+    list.append(row);
+  }
+  card.append(list);
+  output.append(card);
+}
+
+if (typeof document !== "undefined" && document.getElementById) {
+  $("form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    try {
+      const inputs = await gather();
+      show(await verifyDocument(inputs), $("document").files[0].name, inputs.note);
+    } catch (error) {
+      $("output").replaceChildren(element("p", "banner note", `No verdict: ${error.message}.`));
+    }
+  });
+}
+</script>
+</body>
+</html>

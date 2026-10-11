@@ -11,6 +11,7 @@ import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from .keys import load_or_create_key, public_key_hex
@@ -40,6 +41,9 @@ def create_app(ledger_path=None, key_path=None) -> FastAPI:
         yield
 
     app = FastAPI(title="ProofChain ledger", lifespan=lifespan)
+    # Published roots are public. Any web page may read them, which lets the
+    # static browser verifier check a ledger it is not served from. Reading only.
+    app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET"])
 
     @app.post("/entries", status_code=201)
     def append_entry(new: NewEntry, request: Request) -> dict:

@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Current state
 
-Stages 1 to 5 are implemented and tested: `proofchain/core/`, `proofchain/verifier/`, `proofchain/ledger/`, `proofchain/registry/` (service, audit and pages) and `proofchain/ai/`. Stage 6 (demo scripts, static browser verifier, README) is next. `scripts/`, `web-verifier/`, `tests/test_end_to_end.py` and `README.md` are still empty files. Update this file as that changes.
+All six build stages are implemented and tested: `proofchain/core/`, `proofchain/verifier/`, `proofchain/ledger/`, `proofchain/registry/` (service, audit and pages), `proofchain/ai/`, and stage 6: `scripts/demo_seed.py`, `scripts/tamper.py`, `web-verifier/index.html`, `tests/test_end_to_end.py` and `README.md`. Nothing from the optional standout features in section 8 of the brief has been built. Update this file as that changes.
+
+`web-verifier/index.html` re-implements the verification rules in JavaScript between the `// ==core:start` and `// ==core:end` markers. `tests/web_verifier_runner.mjs` runs that block under Node, and `tests/test_end_to_end.py` requires its verdicts, statuses and hashes to equal the Python verifier's. A change to a rule in `core/` or `verifier/` must be made in that block too, and the parity tests are skipped when Node.js is missing, so run them where it is installed.
 
 The AI helper has only been run against a mock transport. It has not been called with a real credential.
 
@@ -37,11 +39,19 @@ uvicorn proofchain.registry.app:app --port 8000
 python -m proofchain.verifier verify --doc degree.pdf --proof degree.proof.json --ledger http://localhost:8001 --pin 1:<entry_hash>
 python -m proofchain.verifier pin --ledger http://localhost:8001
 
+# Demo (ledger must be running; see README.md for the full walk-through)
+python scripts/demo_seed.py            # needs an empty database, or --add
+python scripts/tamper.py rewrite       # also: content, fingerprint, ledger, restore
+
 # Tests
 pytest
 pytest tests/test_merkle.py
 pytest tests/test_merkle.py::test_name
 ```
+
+`tests/test_end_to_end.py` starts a real ledger on a spare port and runs the scripts and the CLI as subprocesses, so it is the slowest file (about 45 seconds). `tamper.py` copies the database to `<db>.before-tamper` before its first change; `restore` puts it back. `tamper.py ledger` never edits the real ledger file: it writes a re-signed copy to the output folder.
+
+The ledger sends `Access-Control-Allow-Origin: *` for GET only, so the static browser verifier can read it from a `file://` page. Do not widen that to POST.
 
 `--ledger` takes the ledger URL or a local ledger file, so verification works offline. A ledger file needs `--pubkey <hex>` or `--pin-file`; with a URL and neither, the key is fetched from the ledger and a warning is printed. `pin --out FILE` saves the checkpoint together with the public key, and `verify --pin-file FILE` uses both. `--json` prints the result as JSON. Exit codes: 0 verified, 1 verification failed, 2 inputs could not be read (not a verdict).
 
