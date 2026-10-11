@@ -1,0 +1,19 @@
+# Secrets
+.env
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Runtime data (database, ledger file, keys)
+data/*
+!data/.gitkeep
+
+# Brief-generation working files and vendored libraries
+_build/
+node_modules/
+
+# Office lock files
+~$*
