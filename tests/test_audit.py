@@ -7,7 +7,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 from proofchain.core.ledger_format import next_entry
-from proofchain.core.merkle import merkle_root
 from proofchain.ledger import app as ledger_app
 from proofchain.ledger.keys import load_or_create_key, sign_entry_hash
 from proofchain.registry import db
@@ -22,7 +21,8 @@ from proofchain.registry.audit import (
 )
 from proofchain.verifier.verify import verify
 
-from .helpers import BRIEF_ROOT, DOCS, confirm, execute, ledger_view, proof_of, query, sealed_batch, upload
+from .helpers import (confirm, execute, ledger_view, proof_of, published_root, query, sealed_batch,
+                      stored_root, upload)
 
 FORGED = b"Document C, with a better grade"
 
@@ -71,7 +71,7 @@ def test_untouched_registry_is_clean(populated, db_path, ledger):
         "record 1": OK, "record 2": OK, "record 3": OK, "record 4": OK, "record 5": OK, "record 6": OK,
     }
     by_subject = findings(report)
-    assert by_subject["batch-0001"].computed == by_subject["batch-0001"].expected == BRIEF_ROOT
+    assert by_subject["batch-0001"].computed == by_subject["batch-0001"].expected == published_root(ledger)
     assert "nothing published yet" in by_subject["batch-0002"].detail
     assert "fits the published root" in by_subject["record 3"].detail
     assert "no published root to compare with yet" in by_subject["record 5"].detail
@@ -126,7 +126,7 @@ def test_changed_fingerprint_is_stored_fingerprint_changed(populated, db_path, l
     assert by_subject["record 3"].computed == sha(b"Document C")
     assert by_subject["record 3"].expected == sha(FORGED)
     assert by_subject["batch-0001"].code == BATCH_ROOT_DIVERGED
-    assert by_subject["batch-0001"].expected == BRIEF_ROOT
+    assert by_subject["batch-0001"].expected == published_root(ledger)
     # The other records of the batch cannot be confirmed against a root that no longer rebuilds.
     assert [by_subject[f"record {i}"].state for i in (1, 2, 4)] == [UNCHECKED] * 3
     assert [by_subject[f"record {i}"].code for i in (1, 2, 4)] == [None] * 3
@@ -138,16 +138,14 @@ def test_changed_fingerprint_is_stored_fingerprint_changed(populated, db_path, l
 
 def test_consistent_rewrite_of_content_fingerprint_and_root_is_batch_root_diverged(populated, db_path, ledger):
     # The attack of requirement R8: the insider changes everything the database holds.
-    fingerprints = [sha(content) for _, content in DOCS]
-    fingerprints[2] = sha(FORGED)
-    forged_root = merkle_root([bytes.fromhex(fp) for fp in fingerprints]).hex()
     execute(db_path, "UPDATE records SET content = ?, fingerprint = ? WHERE id = 3", (FORGED, sha(FORGED)))
+    forged_root = stored_root(db_path)
     execute(db_path, "UPDATE batches SET root = ? WHERE id = 'batch-0001'", (forged_root,))
 
     report = audit(db_path, ledger)
     assert report.codes == [BATCH_ROOT_DIVERGED]
     by_subject = findings(report)
-    assert by_subject["batch-0001"].computed == forged_root and by_subject["batch-0001"].expected == BRIEF_ROOT
+    assert by_subject["batch-0001"].computed == forged_root and by_subject["batch-0001"].expected == published_root(ledger)
     # The audit cannot say which record changed: the ledger holds only the root.
     assert [by_subject[f"record {i}"].state for i in (1, 2, 3, 4)] == [UNCHECKED] * 4
 
@@ -165,7 +163,7 @@ def test_changed_root_column_alone_is_batch_root_diverged(populated, db_path, le
     assert report.codes == [BATCH_ROOT_DIVERGED]
     finding = findings(report)["batch-0001"]
     assert "batches table" in finding.detail
-    assert finding.computed == "ab" * 32 and finding.expected == BRIEF_ROOT
+    assert finding.computed == "ab" * 32 and finding.expected == published_root(ledger)
     # The fingerprints themselves still rebuild the published root, so the records are fine.
     assert all(states(report)[f"record {i}"] == OK for i in (1, 2, 3, 4))
 
@@ -198,7 +196,7 @@ def test_sealed_batch_marked_open_again_is_batch_root_diverged(populated, db_pat
     by_subject = findings(audit(db_path, ledger))
     assert by_subject["batch-0001"].code == BATCH_ROOT_DIVERGED
     assert "marked open here" in by_subject["batch-0001"].detail
-    assert by_subject["batch-0001"].expected == BRIEF_ROOT
+    assert by_subject["batch-0001"].expected == published_root(ledger)
 
 
 def test_sealed_batch_the_ledger_never_saw_is_batch_root_diverged(populated, db_path, ledger):
@@ -289,10 +287,8 @@ def test_ledger_rebuilt_and_resigned_with_the_real_key_is_caught_by_the_registry
 ):
     # The insider holds the ledger key too: they rewrite record 3, its fingerprint, the batch
     # root, and republish that root in a ledger rebuilt from the first entry.
-    fingerprints = [sha(content) for _, content in DOCS]
-    fingerprints[2] = sha(FORGED)
-    forged_root = merkle_root([bytes.fromhex(fp) for fp in fingerprints]).hex()
     execute(db_path, "UPDATE records SET content = ?, fingerprint = ? WHERE id = 3", (FORGED, sha(FORGED)))
+    forged_root = stored_root(db_path)
     execute(db_path, "UPDATE batches SET root = ? WHERE id = 'batch-0001'", (forged_root,))
     rebuild_ledger(ledger_paths, ledger.entries(), lambda e: forged_root)
 

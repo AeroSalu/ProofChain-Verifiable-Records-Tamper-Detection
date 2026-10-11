@@ -15,6 +15,8 @@ from proofchain.registry.ledger_client import LedgerClient, LedgerConflict, Ledg
 from proofchain.verifier.verify import verify
 
 from .helpers import (
+    STAFF,
+    sign_in,
     BRIEF_ROOT,
     DOCS,
     confirm,
@@ -26,6 +28,7 @@ from .helpers import (
     register,
     seal,
     sealed_batch,
+    stored_root,
     upload,
 )
 
@@ -127,10 +130,10 @@ def test_structured_record_gets_the_canonical_fingerprint(registry, db_path, vec
 
 @pytest.mark.parametrize(
     "fields",
-    [{"confirmed_by": ""}, {"confirmed_by": "   "}, {"issuer": ""}, {"issuer": "  "}, {"document_type": ""}],
-    ids=["no-name", "blank-name", "no-issuer", "blank-issuer", "no-document-type"],
+    [{"issuer": ""}, {"issuer": "  "}, {"document_type": ""}],
+    ids=["no-issuer", "blank-issuer", "no-document-type"],
 )
-def test_confirm_needs_a_name_and_the_required_details(fields, registry, db_path):
+def test_confirm_needs_the_required_details(fields, registry, db_path):
     upload(registry, "a.txt", b"Document A")
     assert confirm(registry, 1, **fields).status_code == 422
     row = query(db_path, "SELECT * FROM records")[0]
@@ -152,14 +155,13 @@ def test_confirm_unknown_record_and_confirming_twice(registry, db_path):
 def test_confirmed_records_fill_the_open_batch_in_order(registry, db_path):
     register(registry)
     for record_id in (1, 2, 3, 4):
-        reply = confirm(registry, record_id, issuer=f"Issuer {record_id}", confirmed_by=f"  Clerk {record_id} ",
-                        follow_redirects=False)
+        reply = confirm(registry, record_id, issuer=f"Issuer {record_id}", follow_redirects=False)
         assert reply.status_code == 303 and reply.headers["location"].startswith("/records?notice=")
 
     rows = query(db_path, "SELECT * FROM records ORDER BY id")
     assert [row["batch_id"] for row in rows] == ["batch-0001"] * 4
     assert [row["leaf_index"] for row in rows] == [0, 1, 2, 3]
-    assert [row["confirmed_by"] for row in rows] == [f"Clerk {i}" for i in (1, 2, 3, 4)]
+    assert [row["confirmed_by"] for row in rows] == [STAFF] * 4
     assert json.loads(rows[2]["metadata"]) == {
         "issuer": "Issuer 3", "date": "2026-10-11", "document_type": "Certificate", "category": "Education"}
     assert query(db_path, "SELECT id, status, root FROM batches") == [
@@ -167,16 +169,19 @@ def test_confirmed_records_fill_the_open_batch_in_order(registry, db_path):
 
     assert "No records are waiting." in registry.get("/register").text
     page = registry.get("/records").text
-    assert "batch-0001" in page and "Clerk 3" in page and "Seal batch and publish root" in page
+    assert "batch-0001" in page and f"<td>{STAFF}</td>" in page and "Seal batch and publish root" in page
 
 
 def test_metadata_has_no_effect_on_fingerprints_or_the_root(registry, db_path, ledger):
     register(registry)
     for record_id in (1, 2, 3, 4):
         confirm(registry, record_id, issuer="A completely different issuer", category="Other",
-                document_type="Contract", date="", confirmed_by="Someone Else")
+                document_type="Contract", date="")
     assert seal(registry).status_code == 200
-    assert query(db_path, "SELECT root FROM batches")[0]["root"] == BRIEF_ROOT
+    # The root is a function of fingerprints and salts alone; nothing confirmed above is in it.
+    assert query(db_path, "SELECT root FROM batches")[0]["root"] == stored_root(db_path)
+    assert [r["fingerprint"] for r in query(db_path, "SELECT fingerprint FROM records ORDER BY id")] == \
+        [sha(content) for _, content in DOCS]
 
 
 # ---- sealing and proofs
@@ -209,24 +214,26 @@ def test_seal_with_the_ledger_down_changes_nothing(registry, db_path, ledger):
     assert query(db_path, "SELECT status FROM batches")[0]["status"] == "sealed"
 
 
-def test_sealing_the_brief_documents_publishes_the_brief_root(registry, db_path, ledger):
+def test_sealing_publishes_the_root_of_the_salted_fingerprints(registry, db_path, ledger):
     register(registry)
     confirm_all(registry, db_path)
+    root = stored_root(db_path)
+    assert root != BRIEF_ROOT  # the same four documents, but salted
     reply = seal(registry, follow_redirects=False)
     assert reply.status_code == 303 and reply.headers["location"].startswith("/records?notice=")
 
     entries = ledger.entries()
     assert len(entries) == 1
     entry = entries[0]
-    assert (entry["seq"], entry["batch_id"], entry["root"], entry["tree_size"]) == (0, "batch-0001", BRIEF_ROOT, 4)
+    assert (entry["seq"], entry["batch_id"], entry["root"], entry["tree_size"]) == (0, "batch-0001", root, 4)
 
     assert query(db_path, "SELECT * FROM batches") == [{
-        "id": "batch-0001", "status": "sealed", "root": BRIEF_ROOT, "tree_size": 4, "ledger_seq": 0,
+        "id": "batch-0001", "status": "sealed", "root": root, "tree_size": 4, "ledger_seq": 0,
         "ledger_entry_hash": entry["entry_hash"], "sealed_at": entry["published_at"]}]
     assert query(db_path, "SELECT * FROM meta") == [{"key": "ledger_public_key", "value": ledger.public_key()}]
 
     page = registry.get("/records").text
-    assert BRIEF_ROOT in page and "/records/3/proof" in page and "Seal batch and publish root" not in page
+    assert root in page and "/records/3/proof" in page and "Seal batch and publish root" not in page
 
 
 def test_seal_again_unknown_batch_and_empty_batch(registry, db_path, ledger):
@@ -252,16 +259,19 @@ def test_every_downloaded_proof_passes_the_independent_verifier(registry, db_pat
         assert result.ok and result.batch_id == "batch-0001" and result.ledger_seq == 0
 
     proof = proof_of(registry, 3)
-    assert proof["path"] == [
-        {"side": step["side"], "hash": step["hash"]} for step in vectors["tree4"]["path"]]
-    assert proof["root"] == BRIEF_ROOT and proof["leaf_index"] == 2 and proof["tree_size"] == 4
+    # Same position as Document C in the brief's example, so the same path shape; salted, so other hashes.
+    assert [step["side"] for step in proof["path"]] == [step["side"] for step in vectors["tree4"]["path"]]
+    assert [step["hash"] for step in proof["path"]] != [step["hash"] for step in vectors["tree4"]["path"]]
+    assert proof["version"] == 2 and proof["leaf_index"] == 2 and proof["tree_size"] == 4
+    assert proof["root"] == stored_root(db_path) == entries[0]["root"]
     assert proof["fingerprint"] == sha(b"Document C")
+    assert proof["salt"] == query(db_path, "SELECT salt FROM records WHERE id = 3")[0]["salt"]
 
 
-def test_a_proof_holds_nothing_about_the_record_but_its_fingerprint(registry, db_path):
+def test_a_proof_holds_nothing_about_the_record_but_its_fingerprint_and_salt(registry, db_path):
     sealed_batch(registry, db_path)
     assert set(proof_of(registry, 1)) == {
-        "version", "canon", "fingerprint", "batch_id", "leaf_index", "tree_size", "path", "root"}
+        "version", "canon", "fingerprint", "salt", "batch_id", "leaf_index", "tree_size", "path", "root"}
 
 
 def test_download_names_are_made_safe(registry, db_path):
@@ -292,24 +302,25 @@ def test_seal_adopts_a_root_the_ledger_already_holds(registry, db_path, ledger):
     # The registry stopped after the ledger accepted the root but before marking the batch sealed.
     register(registry)
     confirm_all(registry, db_path)
-    published = ledger.publish("batch-0001", BRIEF_ROOT, 4)
+    published = ledger.publish("batch-0001", stored_root(db_path), 4)
 
     assert seal(registry).status_code == 200
     assert ledger.entries() == [published]
     batch = query(db_path, "SELECT * FROM batches")[0]
-    assert batch["status"] == "sealed" and batch["root"] == BRIEF_ROOT
+    assert batch["status"] == "sealed" and batch["root"] == published["root"]
     assert batch["ledger_entry_hash"] == published["entry_hash"]
 
 
 def test_a_published_root_cannot_be_replaced(registry, db_path, ledger):
     sealed_batch(registry, db_path)
+    original = stored_root(db_path)
     execute(db_path, "UPDATE batches SET status = 'open' WHERE id = 'batch-0001'")
     execute(db_path, "UPDATE records SET fingerprint = ? WHERE id = 3", (sha(b"forged"),))
 
     reply = seal(registry)
     assert reply.status_code == 409
     assert "cannot be replaced" in reply.text
-    assert len(ledger.entries()) == 1 and ledger.entries()[0]["root"] == BRIEF_ROOT
+    assert len(ledger.entries()) == 1 and ledger.entries()[0]["root"] == original
     assert query(db_path, "SELECT status FROM batches")[0]["status"] == "open"
 
 
@@ -331,7 +342,7 @@ def test_verify_page_accepts_an_untouched_document(registry, db_path):
     assert reply.text.count(">passed<") == 5
     assert not any(code in reply.text for code in ALL_CODES)
     assert "document-c.txt matches the record registered in batch-0001 (ledger entry 0)" in reply.text
-    assert BRIEF_ROOT in reply.text and sha(b"Document C") in reply.text
+    assert stored_root(db_path) in reply.text and sha(b"Document C") in reply.text
     assert "does not prove who created the document" in reply.text
     assert "written by AI" not in reply.text
 
@@ -387,6 +398,7 @@ def suggestions(filename, content):
 
 def test_suggestions_are_shown_but_nothing_is_stored_until_a_person_confirms(db_path, ledger):
     with TestClient(registry_app.create_app(db_path, ledger, suggest=suggestions)) as client:
+        sign_in(client)
         assert upload(client, "a.txt", b"Document A").status_code == 200
         page = client.get("/register").text
         assert "Suggested: Example University" in page
@@ -402,7 +414,7 @@ def test_suggestions_are_shown_but_nothing_is_stored_until_a_person_confirms(db_
         row = query(db_path, "SELECT * FROM records")[0]
         assert json.loads(row["metadata"]) == {
             "issuer": "Corrected University", "date": "2026-10-11", "document_type": "Transcript", "category": ""}
-        assert row["confirmed_by"] == "Asha Rao"
+        assert row["confirmed_by"] == STAFF
 
 
 def test_without_a_suggest_hook_the_page_says_there_are_no_suggestions(registry):
@@ -417,6 +429,7 @@ def failing(*args):
 
 def test_a_failing_suggest_hook_does_not_stop_registration(db_path, ledger):
     with TestClient(registry_app.create_app(db_path, ledger, suggest=failing)) as client:
+        sign_in(client)
         assert upload(client, "a.txt", b"Document A").status_code == 200
         row = query(db_path, "SELECT fingerprint, suggested_metadata FROM records")[0]
         assert row == {"fingerprint": sha(b"Document A"), "suggested_metadata": "{}"}
@@ -430,6 +443,7 @@ def test_explanation_is_shown_under_the_verdict_and_labelled(db_path, ledger):
         return "The file you gave is not the one that was registered."
 
     with TestClient(registry_app.create_app(db_path, ledger, explain=explain)) as client:
+        sign_in(client)
         sealed_batch(client, db_path)
         reply = post_verify(client, b"Document C!", proof_of(client, 3))
         assert "The file you gave is not the one that was registered." in reply.text
@@ -446,6 +460,7 @@ def test_the_explain_hook_cannot_change_a_verdict(document, verified, db_path, l
 
     for hook in (None, failing, lying):
         with TestClient(registry_app.create_app(db_path, ledger, explain=hook)) as client:
+            sign_in(client)
             if not query(db_path, "SELECT id FROM batches"):
                 sealed_batch(client, db_path)
             reply = post_verify(client, document, proof_of(client, 3))
@@ -521,9 +536,10 @@ def test_ledger_client_speaks_to_the_real_service(ledger_url):
 def test_registry_seals_through_the_real_http_client(ledger_url, db_path):
     client = LedgerClient(ledger_url)
     with TestClient(registry_app.create_app(db_path, client)) as registry:
+        sign_in(registry)
         sealed_batch(registry, db_path)
         entries, public_key, pin = ledger_view(client)
-        assert entries[0]["root"] == BRIEF_ROOT
+        assert entries[0]["root"] == stored_root(db_path)
         assert verify(b"Document C", proof_of(registry, 3), entries, public_key, pin).ok
         assert "Everything stored here matches its published reference." in registry.get("/audit").text
 
@@ -533,6 +549,7 @@ def test_ledger_client_reports_an_unreachable_ledger(db_path):
     with pytest.raises(LedgerUnavailable):
         client.entries()
     with TestClient(registry_app.create_app(db_path, client)) as registry:
+        sign_in(registry)
         register(registry)
         confirm_all(registry, db_path)
         assert seal(registry).status_code == 502
@@ -544,3 +561,49 @@ def test_ledger_url_comes_from_the_environment(monkeypatch):
     assert LedgerClient().base_url == "http://ledger.example:9001"
     monkeypatch.delenv("PROOFCHAIN_LEDGER_URL")
     assert LedgerClient().base_url == "http://localhost:8001"
+
+
+# ---- discarding an upload that was never confirmed
+
+
+def test_a_pending_upload_can_be_discarded(registry, db_path):
+    upload(registry, "keep.txt", b"Document A")
+    upload(registry, "mistake.txt", b"Document B")
+    page = registry.get("/register").text
+    assert "Waiting for confirmation (2)" in page
+    assert 'formaction="/records/2/discard"' in page and "Discard this upload" in page
+
+    reply = registry.post("/records/2/discard")
+    assert reply.status_code == 200 and "Discarded mistake.txt. It was never registered." in reply.text
+    assert [row["filename"] for row in query(db_path, "SELECT filename FROM records")] == ["keep.txt"]
+    assert "Waiting for confirmation (1)" in reply.text and "mistake.txt</h3>" not in reply.text
+
+
+def test_discard_does_not_need_the_confirmation_fields(registry, db_path):
+    upload(registry, "mistake.txt", b"Document A")
+    assert registry.post("/records/1/discard", data={"issuer": "", "confirmed_by": ""}).status_code == 200
+    assert query(db_path, "SELECT id FROM records") == []
+    assert "No records are waiting." in registry.get("/register").text
+
+
+def test_a_confirmed_record_cannot_be_discarded(registry, db_path, ledger):
+    upload(registry, "a.txt", b"Document A")
+    confirm(registry, 1)
+    reply = registry.post("/records/1/discard")
+    assert reply.status_code == 409 and "A registered record cannot be removed." in reply.text
+    seal(registry)
+    assert registry.post("/records/1/discard").status_code == 409
+    assert len(query(db_path, "SELECT id FROM records")) == 1
+    assert "Everything stored here matches its published reference." in registry.get("/audit").text
+
+
+def test_discarding_an_unknown_record_is_not_found(registry):
+    assert registry.post("/records/99/discard").status_code == 404
+
+
+def test_discarding_a_duplicate_clears_the_warning_on_the_other_record(registry, db_path):
+    upload(registry, "a.txt", b"Document A")
+    upload(registry, "a again.txt", b"Document A")
+    assert registry.get("/register").text.count("Same content as") == 2
+    registry.post("/records/2/discard")
+    assert "Same content as" not in registry.get("/register").text

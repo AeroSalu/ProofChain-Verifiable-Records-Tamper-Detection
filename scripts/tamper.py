@@ -29,7 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from proofchain.core.canonical import CanonicalError, fingerprint  # noqa: E402
 from proofchain.core.ledger_format import GENESIS_PREV_HASH, entry_hash  # noqa: E402
 from proofchain.core.merkle import merkle_root  # noqa: E402
-from proofchain.core.proof import create_bundle  # noqa: E402
+from proofchain.core.proof import create_bundle, leaf_values  # noqa: E402
 from proofchain.ledger.keys import load_or_create_key, sign_entry_hash  # noqa: E402
 
 DEFAULT_DB = "data/registry.db"
@@ -114,12 +114,13 @@ def rewrite(db_path, record_id, out_dir, text=None) -> dict:
         content, forged_fingerprint = _forged(row, text)
         conn.execute("UPDATE records SET content = ?, fingerprint = ? WHERE id = ?",
                      (content, forged_fingerprint, record_id))
-        fingerprints = [r["fingerprint"] for r in conn.execute(
-            "SELECT fingerprint FROM records WHERE batch_id = ? ORDER BY leaf_index, id", (row["batch_id"],))]
-        root = merkle_root([bytes.fromhex(fp) for fp in fingerprints]).hex()
+        leaves = conn.execute("SELECT fingerprint, salt FROM records WHERE batch_id = ? ORDER BY leaf_index, id",
+                              (row["batch_id"],)).fetchall()
+        fingerprints, salts = [r["fingerprint"] for r in leaves], [r["salt"] for r in leaves]
+        root = merkle_root(leaf_values(fingerprints, salts)).hex()
         conn.execute("UPDATE batches SET root = ? WHERE id = ?", (root, row["batch_id"]))
         conn.commit()
-        bundle = create_bundle(row["canon"], row["batch_id"], fingerprints, row["leaf_index"])
+        bundle = create_bundle(row["canon"], row["batch_id"], fingerprints, row["leaf_index"], salts)
     finally:
         conn.close()
 

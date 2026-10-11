@@ -100,6 +100,7 @@ const TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
 const GENESIS = "0".repeat(64);
 const BODY_FIELDS = ["seq", "batch_id", "root", "tree_size", "published_at", "prev_hash"];
 const PROOF_FIELDS = ["version", "canon", "fingerprint", "batch_id", "leaf_index", "tree_size", "path", "root"];
+const SALTED_PROOF_FIELDS = [...PROOF_FIELDS, "salt"];
 
 class Malformed extends Error {}
 
@@ -268,7 +269,10 @@ function canonicalize(canon, bytes) {
 
 // ---- Merkle tree
 
-const leafHash = (fingerprint) => sha256(concat(Uint8Array.of(0), fingerprint));
+// What a record contributes to its batch's tree: its fingerprint, or, in a salted batch,
+// SHA-256(0x02 || salt || fingerprint).
+const leafValue = async (fingerprint, salt) => (salt ? sha256(concat(Uint8Array.of(2), salt, fingerprint)) : fingerprint);
+const leafHash = (value) => sha256(concat(Uint8Array.of(0), value));
 const nodeHash = (left, right) => sha256(concat(Uint8Array.of(1), left, right));
 
 function expectedSides(index, treeSize) {
@@ -298,9 +302,15 @@ const isHex64 = (value) => typeof value === "string" && HEX64.test(value);
 
 function readBundle(data) {
   if (!(data instanceof Map)) throw new Malformed("bundle must be a JSON object");
-  const missing = PROOF_FIELDS.filter((name) => !data.has(name));
+  // The version decides which fields a bundle has: version 1 is unsalted, version 2 carries a salt.
+  if (!data.has("version")) throw new Malformed("bundle is missing: version");
+  const version = data.get("version");
+  if (!(version instanceof Int)) throw new Malformed("version must be an integer");
+  const fields = { 1: PROOF_FIELDS, 2: SALTED_PROOF_FIELDS }[version.value];
+  if (!fields) throw new Malformed(`unsupported bundle version: ${version.value}`);
+  const missing = fields.filter((name) => !data.has(name));
   if (missing.length) throw new Malformed(`bundle is missing: ${missing.join(", ")}`);
-  const unknown = [...data.keys()].filter((name) => !PROOF_FIELDS.includes(name)).sort();
+  const unknown = [...data.keys()].filter((name) => !fields.includes(name)).sort();
   if (unknown.length) throw new Malformed(`bundle has unknown fields: ${unknown.join(", ")}`);
 
   const integer = (name) => {
@@ -312,7 +322,6 @@ function readBundle(data) {
     return value;
   };
 
-  if (integer("version") !== 1n) throw new Malformed(`unsupported bundle version: ${data.get("version").value}`);
   if (!CANONS.includes(data.get("canon"))) throw new Malformed("unknown canonical form");
   const batchId = data.get("batch_id");
   if (typeof batchId !== "string" || !batchId) throw new Malformed("batch_id must be a non-empty string");
@@ -334,7 +343,8 @@ function readBundle(data) {
   path.forEach((step, i) => {
     if (step.side !== sides[i]) throw new Malformed(`path step ${i + 1} is on the wrong side for leaf ${leafIndex} of ${treeSize}`);
   });
-  return { canon: data.get("canon"), fingerprint: hex64(data.get("fingerprint"), "fingerprint"), batchId,
+  const salt = fields === SALTED_PROOF_FIELDS ? hex64(data.get("salt"), "salt") : null;
+  return { canon: data.get("canon"), fingerprint: hex64(data.get("fingerprint"), "fingerprint"), salt, batchId,
            leafIndex, treeSize, path, root: hex64(data.get("root"), "root") };
 }
 
@@ -493,7 +503,8 @@ async function verifyDocument({ document, proofText, entries, publicKey, pin = n
       `the document cannot be put into ${bundle.canon} form: ${error.message}`, null, bundle.fingerprint);
   }
 
-  const folded = toHex(await foldPath(fromHex(bundle.fingerprint), bundle.path));
+  const leaf = await leafValue(fromHex(bundle.fingerprint), bundle.salt ? fromHex(bundle.salt) : null);
+  const folded = toHex(await foldPath(leaf, bundle.path));
   const proofCheck = folded === bundle.root
     ? check("Proof check", CODES.PROOF, "pass", "the path leads from the proof's fingerprint to the proof's root", folded, bundle.root)
     : check("Proof check", CODES.PROOF, "fail", "the path does not lead from the proof's fingerprint to the proof's root", folded, bundle.root);

@@ -2,12 +2,12 @@
 {% block title %}Verify{% endblock %}
 {% block content %}
 <h1>Verify a document</h1>
-<p class="lead">Give the document and its proof bundle. Five checks are run against the ledger, and each one shows the hashes it computed. The registry's stored records and fingerprints are not consulted.</p>
+<p class="lead">Give the document and its proof. Five checks are run against the ledger, and each one shows the hashes it computed. The registry's stored records and fingerprints are not consulted.</p>
 
 <form class="card" method="post" action="/verify" enctype="multipart/form-data">
   <div class="fields">
     <label>Document <input type="file" name="document" required></label>
-    <label>Proof bundle (.proof.json) <input type="file" name="proof" required></label>
+    <label>Proof (.proof.json) <input type="file" name="proof" required></label>
   </div>
   <button type="submit">Run the five checks</button>
 </form>

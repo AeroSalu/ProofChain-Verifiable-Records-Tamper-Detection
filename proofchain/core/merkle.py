@@ -8,6 +8,15 @@ other (as in RFC 6962). When a level has an odd number of entries the last one
 moves up unchanged; it is never duplicated, which is what made two different
 leaf lists share a root in CVE-2012-2459.
 
+A tree is built over 32-byte leaf values. For an unsalted batch the leaf value
+is the document's fingerprint. For a salted batch it is
+
+    leaf value = SHA-256(0x02 || salt || fingerprint)
+
+with a random 32-byte salt per record. Two registrations of the same content
+then occupy different leaves, and a sibling hash in someone else's proof cannot
+be matched against guessed documents.
+
 Everything here works on raw 32-byte digests. Hex belongs to the proof format.
 """
 
@@ -17,6 +26,7 @@ from typing import NamedTuple
 HASH_SIZE = 32
 LEAF_PREFIX = b"\x00"
 NODE_PREFIX = b"\x01"
+SALT_PREFIX = b"\x02"
 
 LEFT = "left"
 RIGHT = "right"
@@ -33,6 +43,13 @@ def _digest(value, name: str) -> bytes:
     if not isinstance(value, (bytes, bytearray)) or len(value) != HASH_SIZE:
         raise ValueError(f"{name} must be {HASH_SIZE} bytes")
     return bytes(value)
+
+
+def leaf_value(fingerprint: bytes, salt: bytes | None = None) -> bytes:
+    """What a record contributes to its batch's tree: its fingerprint, salted if a salt is given."""
+    if salt is None:
+        return _digest(fingerprint, "fingerprint")
+    return hashlib.sha256(SALT_PREFIX + _digest(salt, "salt") + _digest(fingerprint, "fingerprint")).digest()
 
 
 def leaf_hash(fingerprint: bytes) -> bytes:

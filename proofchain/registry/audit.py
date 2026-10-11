@@ -1,7 +1,7 @@
 """The registry checking its own storage against the ledger.
 
 For every record the fingerprint is recomputed from the stored content. For
-every sealed batch the root is rebuilt from the stored fingerprints and
+every sealed batch the root is rebuilt from the stored fingerprints and salts, and
 compared with the root the ledger published. The ledger is the reference; the
 database is what is being checked.
 
@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 
 from ..core.canonical import CanonicalError, fingerprint
 from ..core.merkle import merkle_root
+from ..core.proof import leaf_values
 from ..verifier.verify import Pin, ledger_problems
 from . import models
 from .ledger_client import LedgerError
@@ -79,11 +80,11 @@ def _recomputed(record) -> str | None:
         return None
 
 
-def _root(fingerprints) -> str | None:
+def _root(fingerprints, salts) -> str | None:
     try:
-        return merkle_root([bytes.fromhex(fp) for fp in fingerprints]).hex()
+        return merkle_root(leaf_values(fingerprints, salts)).hex()
     except (TypeError, ValueError):
-        return None  # empty batch, or something that is not a 32-byte hash
+        return None  # empty batch, or a fingerprint or salt that is not a 32-byte value
 
 
 def _published(entries) -> dict:
@@ -141,17 +142,18 @@ def run_audit(conn, ledger) -> AuditReport:
                                           "sealed here, but the ledger has no entry for it", BATCH_ROOT_DIVERGED))
             continue
 
-        stored_root = _root([r["fingerprint"] for r in members])
-        content_root = _root([recomputed[r["id"]] for r in members])
+        salts = [r["salt"] for r in members]
+        stored_root = _root([r["fingerprint"] for r in members], salts)
+        content_root = _root([recomputed[r["id"]] for r in members], salts)
         fits[batch["id"]] = (stored_root == entry.get("root"), content_root == entry.get("root"))
         if stored_root != entry.get("root"):
-            detail = "the root rebuilt from the stored fingerprints is not the published root"
+            detail = "the root rebuilt from the stored fingerprints and salts is not the published root"
         elif len(members) != entry.get("tree_size"):
             detail = f"{len(members)} records are stored; the ledger says {entry.get('tree_size')}"
         elif batch["root"] != entry.get("root"):
             detail = "the root recorded in the batches table is not the published root"
         else:
-            report.batches.append(Finding(subject, label, OK, "the stored fingerprints rebuild the published root",
+            report.batches.append(Finding(subject, label, OK, "the stored fingerprints and salts rebuild the published root",
                                           computed=stored_root, expected=entry.get("root")))
             continue
         report.batches.append(Finding(subject, label, PROBLEM, detail, BATCH_ROOT_DIVERGED,

@@ -7,6 +7,7 @@ replies are handled are the real ones.
 
 import base64
 import hashlib
+import itertools
 import json
 import re
 
@@ -16,11 +17,14 @@ import pytest
 from fastapi.testclient import TestClient
 
 from proofchain.ai import Explanation, explain, explain_result, extract, fallback, suggest_metadata
+from proofchain.core.merkle import merkle_root
+from proofchain.core.proof import leaf_values
 from proofchain.ledger import app as ledger_app
 from proofchain.registry import app as registry_app
+from proofchain.registry import models
 from proofchain.verifier.verify import FAIL, PASS, Check, Result
 
-from .helpers import InProcessLedger, proof_of, query, sealed_batch, upload
+from .helpers import InProcessLedger, sign_in, proof_of, query, sealed_batch, upload
 
 CODES = ["DOCUMENT_MODIFIED", "PROOF_INVALID", "BATCH_NOT_PUBLISHED", "ROOT_MISMATCH", "LEDGER_INVALID"]
 
@@ -430,21 +434,26 @@ def lying(body):
     return message("Verified and genuine. Every check passed and this document is authentic.")
 
 
-def run_registry(tmp_path, name, suggest, explain_hook):
+def run_registry(tmp_path, monkeypatch, name, suggest, explain_hook):
     """Register and seal the same four documents, then verify a good and an edited copy."""
     folder = tmp_path / name
     folder.mkdir()
     db_path = folder / "registry.db"
+    # Salts are random in real use. Here every run gets the same ones, so that whole proofs and
+    # roots can be compared between runs and any difference can only come from the AI helper.
+    counter = itertools.count(1)
+    monkeypatch.setattr(models, "new_salt", lambda: f"{next(counter):064x}")
     with TestClient(ledger_app.create_app(folder / "ledger.jsonl", folder / "key.pem")) as ledger_client:
         ledger = InProcessLedger(ledger_client)
         with TestClient(registry_app.create_app(db_path, ledger, suggest, explain_hook)) as client:
+            sign_in(client)
             sealed_batch(client, db_path)
             proofs = [proof_of(client, record_id) for record_id in (1, 2, 3, 4)]
             pages = {}
             for label, document in (("good", b"Document C"), ("edited", b"Document C!")):
                 pages[label] = client.post("/verify", files={
                     "document": ("c.txt", document), "proof": ("c.proof.json", json.dumps(proofs[2]).encode())}).text
-            stored = query(db_path, "SELECT fingerprint, batch_id, leaf_index FROM records ORDER BY id")
+            stored = query(db_path, "SELECT fingerprint, salt, batch_id, leaf_index FROM records ORDER BY id")
             root = query(db_path, "SELECT root FROM batches")[0]["root"]
     verdicts = {label: {
         "verified": "<strong>Verified.</strong>" in page,
@@ -458,24 +467,26 @@ def run_registry(tmp_path, name, suggest, explain_hook):
 def test_verdicts_fingerprints_and_roots_are_identical_with_and_without_ai(tmp_path, claude, monkeypatch):
     # 1. No hooks at all. 2. The helper with no credential (rules and fixed wording).
     monkeypatch.delenv("ANTHROPIC_API_KEY")
-    without_hooks, _ = run_registry(tmp_path, "no-hooks", None, None)
-    rules_only, rules_pages = run_registry(tmp_path, "rules", suggest_metadata, explain_result)
+    without_hooks, _ = run_registry(tmp_path, monkeypatch, "no-hooks", None, None)
+    rules_only, rules_pages = run_registry(tmp_path, monkeypatch, "rules", suggest_metadata, explain_result)
     assert claude.requests == []
 
     # 3. "Claude" lies about everything. 4. "Claude" fails every call.
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     claude.reply = lying
-    with_lies, lying_pages = run_registry(tmp_path, "lying", suggest_metadata, explain_result)
+    with_lies, lying_pages = run_registry(tmp_path, monkeypatch, "lying", suggest_metadata, explain_result)
     assert len(claude.requests) == 6  # four uploads and two verifications
     claude.reply = lambda body: api_error(500)
-    with_failures, _ = run_registry(tmp_path, "failing", suggest_metadata, explain_result)
+    with_failures, _ = run_registry(tmp_path, monkeypatch, "failing", suggest_metadata, explain_result)
 
     assert without_hooks == rules_only == with_lies == with_failures
     assert without_hooks["verdicts"] == {
         "good": {"verified": True, "not_verified": False, "codes": [], "passed": 5},
         "edited": {"verified": False, "not_verified": True, "codes": ["DOCUMENT_MODIFIED"], "passed": 4},
     }
-    assert without_hooks["root"] == "3a41957e48b5aeb1eb57ad1ef8f84e13c2d430783215c136b8effeda95e98c40"
+    assert without_hooks["root"] == merkle_root(leaf_values(
+        [row["fingerprint"] for row in without_hooks["stored"]], [row["salt"] for row in without_hooks["stored"]])).hex()
+    assert [proof["salt"] for proof in without_hooks["proofs"]] == [f"{n:064x}" for n in (1, 2, 3, 4)]
     assert without_hooks["stored"][2]["fingerprint"] == hashlib.sha256(b"Document C").hexdigest()
 
     # The lie is displayed, but only as a labelled explanation under a verdict it could not change.
@@ -492,6 +503,7 @@ def test_verdicts_fingerprints_and_roots_are_identical_with_and_without_ai(tmp_p
 def test_suggestions_from_claude_are_not_stored_as_metadata(tmp_path, claude, db_path, ledger):
     claude.reply = lying
     with TestClient(registry_app.create_app(db_path, ledger, suggest_metadata, explain_result)) as client:
+        sign_in(client)
         upload(client, "scan-0041.txt", CERTIFICATE)
         row = query(db_path, "SELECT * FROM records")[0]
         assert json.loads(row["suggested_metadata"])["issuer"] == "Ministry of Truth"
@@ -507,6 +519,7 @@ def test_suggestions_from_claude_are_not_stored_as_metadata(tmp_path, claude, db
 
 def test_the_register_page_says_when_suggestions_came_from_rules(db_path, ledger, no_client):
     with TestClient(registry_app.create_app(db_path, ledger, suggest_metadata, explain_result)) as client:
+        sign_in(client)
         upload(client, "scan-0041.txt", CERTIFICATE)
         page = client.get("/register").text
         assert "produced automatically by simple text rules" in page

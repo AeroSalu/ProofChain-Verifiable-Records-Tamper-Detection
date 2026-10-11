@@ -10,14 +10,25 @@
   <header class="top">
     <a class="brand" href="/">ProofChain <span>registry</span></a>
     <nav>
+      {% if user %}
       <a href="/register" {% if page == 'register' %}aria-current="page"{% endif %}>Register</a>
       <a href="/records" {% if page == 'records' %}aria-current="page"{% endif %}>Records and batches</a>
       <a href="/audit" {% if page == 'audit' %}aria-current="page"{% endif %}>Audit</a>
+      {% endif %}
       <a href="/verify" {% if page == 'verify' %}aria-current="page"{% endif %}>Verify</a>
     </nav>
+    <div class="account">
+      {% if user %}
+      <span>Signed in as <span class="who">{{ user }}</span></span>
+      <form method="post" action="/logout"><button type="submit" class="ghost">Sign out</button></form>
+      {% else %}
+      <a href="/login" {% if page == 'login' %}aria-current="page"{% endif %}>Staff sign in</a>
+      {% endif %}
+    </div>
   </header>
   <main>
     {% if notice %}<p class="banner good" role="status">{{ notice }}</p>{% endif %}
+    {% if warning %}<p class="banner warn" role="alert">{{ warning }}</p>{% endif %}
     {% if error %}<p class="banner bad" role="alert">{{ error }}</p>{% endif %}
     {% block content %}{% endblock %}
   </main>

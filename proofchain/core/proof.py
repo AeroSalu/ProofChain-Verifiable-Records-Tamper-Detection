@@ -3,6 +3,10 @@
 A bundle is a small JSON file holding the registered fingerprint, where the
 record sits in its batch, the sibling path, and the root the path should reach.
 It contains nothing else from the batch.
+
+Version 1 bundles are unsalted: the leaf value is the fingerprint. Version 2
+bundles carry the record's salt, and the leaf value is the salted fingerprint.
+Both stay verifiable; the registry issues version 2.
 """
 
 import json
@@ -11,11 +15,13 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .canonical import CANONS
-from .merkle import PathStep, expected_sides, fold_path, merkle_path, merkle_root
+from .merkle import PathStep, expected_sides, fold_path, leaf_value, merkle_path, merkle_root
 
-PROOF_VERSION = 1
+UNSALTED_VERSION = 1
+SALTED_VERSION = 2
 
 _FIELDS = ("version", "canon", "fingerprint", "batch_id", "leaf_index", "tree_size", "path", "root")
+_FIELDS_BY_VERSION = {UNSALTED_VERSION: _FIELDS, SALTED_VERSION: _FIELDS + ("salt",)}
 _HEX64 = re.compile(r"[0-9a-f]{64}")
 
 
@@ -44,23 +50,35 @@ class ProofBundle:
     tree_size: int
     path: tuple[PathStep, ...]
     root: str
-    version: int = PROOF_VERSION
+    salt: str | None = None
+
+    @property
+    def version(self) -> int:
+        return UNSALTED_VERSION if self.salt is None else SALTED_VERSION
+
+    def leaf_value(self) -> bytes:
+        salt = None if self.salt is None else bytes.fromhex(self.salt)
+        return leaf_value(bytes.fromhex(self.fingerprint), salt)
 
     def computed_root(self) -> str:
-        """Fold the path from the bundle's own fingerprint."""
-        return fold_path(bytes.fromhex(self.fingerprint), self.path).hex()
+        """Fold the path from the bundle's own fingerprint (and salt, if it has one)."""
+        return fold_path(self.leaf_value(), self.path).hex()
 
     def to_dict(self) -> dict:
-        return {
+        data = {
             "version": self.version,
             "canon": self.canon,
             "fingerprint": self.fingerprint,
+            "salt": self.salt,
             "batch_id": self.batch_id,
             "leaf_index": self.leaf_index,
             "tree_size": self.tree_size,
             "path": [{"side": step.side, "hash": step.hash.hex()} for step in self.path],
             "root": self.root,
         }
+        if self.salt is None:
+            del data["salt"]
+        return data
 
     def dumps(self) -> str:
         return json.dumps(self.to_dict(), indent=2) + "\n"
@@ -69,17 +87,31 @@ class ProofBundle:
         Path(path).write_text(self.dumps(), encoding="utf-8")
 
 
-def create_bundle(canon: str, batch_id: str, fingerprints, leaf_index: int) -> ProofBundle:
-    """Build the bundle for one record from the batch's fingerprints in leaf order."""
-    fps = [bytes.fromhex(fp) for fp in fingerprints]
+def leaf_values(fingerprints, salts=None) -> list[bytes]:
+    """A batch's leaf values in leaf order, from hex fingerprints and, for a salted batch, hex salts."""
+    if salts is None:
+        return [leaf_value(bytes.fromhex(fp)) for fp in fingerprints]
+    if len(salts) != len(fingerprints):
+        raise ValueError("a salted batch needs one salt per fingerprint")
+    return [leaf_value(bytes.fromhex(fp), bytes.fromhex(salt)) for fp, salt in zip(fingerprints, salts)]
+
+
+def create_bundle(canon: str, batch_id: str, fingerprints, leaf_index: int, salts=None) -> ProofBundle:
+    """Build the bundle for one record from the batch's fingerprints in leaf order.
+
+    With salts (one per fingerprint, in the same order) the batch is salted and
+    the bundle carries its own record's salt.
+    """
+    values = leaf_values(fingerprints, salts)
     bundle = ProofBundle(
         canon=canon,
         fingerprint=fingerprints[leaf_index],
         batch_id=batch_id,
         leaf_index=leaf_index,
-        tree_size=len(fps),
-        path=tuple(merkle_path(fps, leaf_index)),
-        root=merkle_root(fps).hex(),
+        tree_size=len(values),
+        path=tuple(merkle_path(values, leaf_index)),
+        root=merkle_root(values).hex(),
+        salt=None if salts is None else salts[leaf_index],
     )
     return from_dict(bundle.to_dict())
 
@@ -92,15 +124,18 @@ def from_dict(data) -> ProofBundle:
     """
     if not isinstance(data, dict):
         raise ProofFormatError("bundle must be a JSON object")
-    missing = [name for name in _FIELDS if name not in data]
+    # The version decides which fields a bundle has, so it is read first.
+    if "version" not in data:
+        raise ProofFormatError("bundle is missing: version")
+    fields = _FIELDS_BY_VERSION.get(_integer(data["version"], "version"))
+    if fields is None:
+        raise ProofFormatError(f"unsupported bundle version: {data['version']}")
+    missing = [name for name in fields if name not in data]
     if missing:
         raise ProofFormatError(f"bundle is missing: {', '.join(missing)}")
-    unknown = sorted(set(data) - set(_FIELDS))
+    unknown = sorted(set(data) - set(fields))
     if unknown:
         raise ProofFormatError(f"bundle has unknown fields: {', '.join(unknown)}")
-
-    if _integer(data["version"], "version") != PROOF_VERSION:
-        raise ProofFormatError(f"unsupported bundle version: {data['version']}")
     if data["canon"] not in CANONS:
         raise ProofFormatError(f"unknown canonical form: {data['canon']!r}")
     if not isinstance(data["batch_id"], str) or not data["batch_id"]:
@@ -133,7 +168,7 @@ def from_dict(data) -> ProofBundle:
             )
 
     return ProofBundle(
-        version=data["version"],
+        salt=_hex64(data["salt"], "salt") if "salt" in fields else None,
         canon=data["canon"],
         fingerprint=_hex64(data["fingerprint"], "fingerprint"),
         batch_id=data["batch_id"],

@@ -19,6 +19,7 @@ import pytest
 import uvicorn
 
 from proofchain.core.canonical import CanonicalError, JSON_SORTED_V1, fingerprint
+from proofchain.core.merkle import leaf_hash
 from proofchain.ledger import app as ledger_app
 from proofchain.registry import audit, db
 from proofchain.registry.ledger_client import LedgerClient
@@ -275,7 +276,13 @@ def test_web_verifier_gives_the_same_verdicts_as_the_cli(seeded):
         "size": lambda p: p.update(tree_size=3, path=p["path"][:1] if p["leaf_index"] == 2 else p["path"]),
         "extra": lambda p: p.update(note="hello"),
         "upper": lambda p: p.update(root=p["root"].upper()),
-        "version": lambda p: p.update(version=2),
+        "version": lambda p: p.update(version=3),
+        "wrong_salt": lambda p: p.update(salt="cd" * 32),
+        "no_salt": lambda p: p.pop("salt"),
+        "upper_salt": lambda p: p.update(salt=p["salt"].upper().replace("0", "A")),
+        "downgrade": lambda p: (p.pop("salt"), p.update(version=1)),
+        "unsalted": lambda p: (p.pop("salt"), p.update(version=1, leaf_index=0, tree_size=1, path=[],
+                                                     root=leaf_hash(bytes.fromhex(p["fingerprint"])).hex())),
         "float": lambda p: p.update(leaf_index=0.0),
     }
     for label, change in variants.items():

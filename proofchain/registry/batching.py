@@ -2,7 +2,7 @@
 
 Sealing is the step that turns stored records into a published root:
 
-    fingerprints in leaf order -> Merkle root -> ledger entry -> batch sealed
+    salted fingerprints in leaf order -> Merkle root -> ledger entry -> batch sealed
 
 The root goes to the ledger before the batch is marked sealed. If the registry
 stops between the two, sealing again finds the entry already there and adopts
@@ -10,7 +10,7 @@ it, provided it is the same root.
 """
 
 from ..core.merkle import merkle_root
-from ..core.proof import ProofBundle, create_bundle
+from ..core.proof import ProofBundle, create_bundle, leaf_values
 from . import models
 from .db import transaction
 from .ledger_client import LedgerConflict
@@ -42,8 +42,10 @@ def confirm_record(conn, record_id: int, metadata: dict, confirmed_by: str) -> s
     return batch_id
 
 
-def _fingerprints(conn, batch_id: str) -> list[str]:
-    return [record["fingerprint"] for record in models.batch_records(conn, batch_id)]
+def _leaves(conn, batch_id: str) -> tuple[list[str], list[str]]:
+    """A batch's fingerprints and salts, in leaf order."""
+    records = models.batch_records(conn, batch_id)
+    return [r["fingerprint"] for r in records], [r["salt"] for r in records]
 
 
 def seal_batch(conn, batch_id: str, ledger) -> dict:
@@ -54,10 +56,13 @@ def seal_batch(conn, batch_id: str, ledger) -> dict:
             raise NotFound(f"there is no batch {batch_id}")
         if batch["status"] != "open":
             raise Conflict(f"{batch_id} is already sealed")
-        fingerprints = _fingerprints(conn, batch_id)
+        fingerprints, salts = _leaves(conn, batch_id)
         if not fingerprints:
             raise Conflict(f"{batch_id} has no records to seal")
-        root = merkle_root([bytes.fromhex(fp) for fp in fingerprints]).hex()
+        try:
+            root = merkle_root(leaf_values(fingerprints, salts)).hex()
+        except (TypeError, ValueError) as exc:
+            raise Conflict(f"the stored data for {batch_id} is inconsistent ({exc}); run the audit") from exc
 
         if models.get_meta(conn, models.LEDGER_PUBLIC_KEY) is None:
             models.set_meta(conn, models.LEDGER_PUBLIC_KEY, ledger.public_key())
@@ -75,7 +80,7 @@ def seal_batch(conn, batch_id: str, ledger) -> dict:
 def build_proof(conn, record_id: int) -> tuple[dict, ProofBundle]:
     """The proof bundle for one record of a sealed batch, built from stored data.
 
-    If the stored fingerprints were altered after sealing, the bundle this
+    If the stored fingerprints or salts were altered after sealing, the bundle this
     returns leads to a root that was never published, and a verifier reports
     ROOT_MISMATCH.
     """
@@ -86,7 +91,8 @@ def build_proof(conn, record_id: int) -> tuple[dict, ProofBundle]:
     if batch is None or batch["status"] != "sealed":
         raise Conflict("a proof exists only after the record's batch is sealed")
     try:
-        bundle = create_bundle(record["canon"], batch["id"], _fingerprints(conn, batch["id"]), record["leaf_index"])
+        fingerprints, salts = _leaves(conn, batch["id"])
+        bundle = create_bundle(record["canon"], batch["id"], fingerprints, record["leaf_index"], salts)
     except (ValueError, IndexError, TypeError) as exc:
         raise Conflict(f"the stored data for {batch['id']} is inconsistent ({exc}); run the audit") from exc
     return record, bundle

@@ -2,6 +2,9 @@
 
 The registry never opens the ledger file and never sees the ledger key. Tests
 pass in any object with these four methods instead of this class.
+
+Appending needs the shared secret in PROOFCHAIN_LEDGER_TOKEN, which is sent as
+a bearer token with that one request. Reading the ledger sends no credential.
 """
 
 import json
@@ -28,15 +31,22 @@ def default_url() -> str:
     return os.environ.get("PROOFCHAIN_LEDGER_URL", DEFAULT_LEDGER_URL)
 
 
+def default_token() -> str | None:
+    return os.environ.get("PROOFCHAIN_LEDGER_TOKEN") or None
+
+
 class LedgerClient:
-    def __init__(self, base_url: str | None = None, timeout: float = 10):
+    def __init__(self, base_url: str | None = None, timeout: float = 10, token: str | None = None):
         self.base_url = (base_url or default_url()).rstrip("/")
         self.timeout = timeout
+        self.token = token or default_token()
 
-    def _request(self, method: str, path: str, body=None):
+    def _request(self, method: str, path: str, body=None, authorise: bool = False):
         data = None if body is None else json.dumps(body).encode("utf-8")
-        request = urllib.request.Request(self.base_url + path, data=data, method=method,
-                                         headers={"Content-Type": "application/json"})
+        headers = {"Content-Type": "application/json"}
+        if authorise and self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
+        request = urllib.request.Request(self.base_url + path, data=data, method=method, headers=headers)
         try:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
                 return response.status, json.load(response)
@@ -50,9 +60,16 @@ class LedgerClient:
     def publish(self, batch_id: str, root: str, tree_size: int) -> dict:
         """Ask the ledger to append one root. Returns the signed entry."""
         status, entry = self._request("POST", "/entries",
-                                      {"batch_id": batch_id, "root": root, "tree_size": tree_size})
+                                      {"batch_id": batch_id, "root": root, "tree_size": tree_size}, authorise=True)
         if status == 409:
             raise LedgerConflict(batch_id)
+        if status == 401:
+            raise LedgerError(
+                "the ledger rejected the registry's token; PROOFCHAIN_LEDGER_TOKEN must be the same for both"
+                if self.token else
+                "the ledger needs a token to accept a root, and PROOFCHAIN_LEDGER_TOKEN is not set for the registry")
+        if status == 503:
+            raise LedgerError("the ledger is not accepting new roots: it was started without PROOFCHAIN_LEDGER_TOKEN")
         if status != 201:
             raise LedgerError(f"the ledger refused the root for {batch_id} (HTTP {status})")
         return entry

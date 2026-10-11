@@ -2,18 +2,22 @@
 
     python scripts/demo_seed.py [--db data/registry.db] [--ledger http://localhost:8001] [--out data/demo]
 
-Needs the ledger service running; the registry may be running or stopped. It
-registers four sample documents, seals them into one batch, and leaves a fifth
-waiting for confirmation so the Register page has something to show. Each
-sealed document is written to the output folder with its proof bundle, and the
-ledger head is pinned to pin.json there.
+Needs the ledger service running, and PROOFCHAIN_LEDGER_TOKEN set in this
+terminal to the same value the ledger was started with; the registry may be
+running or stopped. It registers four sample documents, seals them into one
+batch, and leaves a fifth waiting for confirmation so the Register page has
+something to show. Each sealed document is written to the output folder with
+its proof bundle, and the ledger head is pinned to pin.json there.
 
-The sample records are confirmed by this script, which stands in for the person
-who would normally check them. That is acceptable for demo data only.
+It also creates a staff account named "demo" with a random password, printed
+once, for signing in to the pages. The sample records are confirmed under that
+account by this script, which stands in for the person who would normally check
+them. That is acceptable for demo data only.
 """
 
 import argparse
 import json
+import secrets
 import sys
 from pathlib import Path
 
@@ -21,11 +25,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from proofchain.ai import fallback  # noqa: E402
 from proofchain.core.canonical import JSON_SORTED_V1, RAW_BYTES_V1, fingerprint  # noqa: E402
-from proofchain.registry import batching, db, models  # noqa: E402
+from proofchain.registry import batching, db, models, staff  # noqa: E402
 from proofchain.registry.ledger_client import LedgerClient, LedgerError, default_url  # noqa: E402
 from proofchain.verifier.verify import ledger_problems  # noqa: E402
 
-CONFIRMED_BY = "Demo seed script"
+DEMO_ACCOUNT = "demo"
 
 DEGREE = b"""RIVERSIDE UNIVERSITY
 Office of the Registrar
@@ -105,10 +109,22 @@ def _add(conn, filename, content, canon) -> int:
     return models.add_record(conn, filename, content, canon, fingerprint(canon, content), suggested)
 
 
+def _demo_account(conn) -> str | None:
+    """Create the demo account. Returns its new password, or None if the account was already there."""
+    if staff.exists(conn, DEMO_ACCOUNT):
+        return None
+    password = secrets.token_urlsafe(9)
+    staff.add_staff(conn, DEMO_ACCOUNT, password)
+    return password
+
+
 def seed(db_path, ledger_url, out_dir, add=False) -> dict:
     """Seed the registry and write the demo files. Returns a summary of what was done."""
     out_dir = Path(out_dir)
     ledger = LedgerClient(ledger_url)
+    if not ledger.token:
+        raise SeedError("PROOFCHAIN_LEDGER_TOKEN is not set in this terminal. Set it to the value the ledger "
+                        "was started with, so the sample batch can be published.")
     db.init_db(db_path)
     conn = db.connect(db_path)
     try:
@@ -121,12 +137,17 @@ def seed(db_path, ledger_url, out_dir, add=False) -> dict:
         except LedgerError as exc:
             raise SeedError(f"{exc}. Start the ledger first: uvicorn proofchain.ledger.app:app --port 8001") from exc
 
+        password = _demo_account(conn)
         record_ids = []
         for filename, content, canon, metadata in SEALED:
             record_id = _add(conn, filename, content, canon)
-            batch_id = batching.confirm_record(conn, record_id, metadata, CONFIRMED_BY)
+            batch_id = batching.confirm_record(conn, record_id, metadata, DEMO_ACCOUNT)
             record_ids.append(record_id)
-        entry = batching.seal_batch(conn, batch_id, ledger)
+        try:
+            entry = batching.seal_batch(conn, batch_id, ledger)
+        except LedgerError as exc:
+            raise SeedError(f"{exc}. The samples were added and {batch_id} is still open; start from empty "
+                            "data again once this is fixed.") from exc
         pending_id = _add(conn, *PENDING)
 
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -148,7 +169,8 @@ def seed(db_path, ledger_url, out_dir, add=False) -> dict:
     (out_dir / "pin.json").write_text(json.dumps(pin, indent=2) + "\n", encoding="utf-8")
 
     return {"batch_id": batch_id, "root": entry["root"], "ledger_seq": entry["seq"], "record_ids": record_ids,
-            "pending_id": pending_id, "files": files, "out_dir": str(out_dir)}
+            "pending_id": pending_id, "files": files, "out_dir": str(out_dir),
+            "account": DEMO_ACCOUNT, "password": password}
 
 
 def main(argv=None) -> int:
@@ -170,6 +192,13 @@ def main(argv=None) -> int:
     print(f"Root: {done['root']}")
     print(f"Record {done['pending_id']} ({PENDING[0]}) is waiting for confirmation on the Register page.")
     print(f"Documents, proofs and pin.json are in {out}.")
+    print()
+    if done["password"]:
+        print(f"Sign in to the registry pages as:  {done['account']}  /  {done['password']}")
+        print("This password is shown once and only its hash is stored. It is for the demo; create real")
+        print("accounts with: python -m proofchain.registry.staff add <username>")
+    else:
+        print(f"The account {done['account']} already existed, so its password was left as it was.")
     print()
     print("Verify one independently:")
     print(f"  python -m proofchain.verifier verify --doc {out / first} --proof {out / (first + '.proof.json')} "

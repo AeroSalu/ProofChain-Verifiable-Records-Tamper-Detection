@@ -36,7 +36,7 @@
         <tr>
           <td>{{ record.leaf_index }}</td>
           <td>{{ record.filename }}</td>
-          <td><code title="{{ record.fingerprint }}">{{ record.fingerprint | short }}</code></td>
+          <td><code title="fingerprint {{ record.fingerprint }}, salt {{ record.salt }}">{{ record.fingerprint | short }}</code></td>
           <td>{{ record.metadata.issuer }} · {{ record.metadata.document_type }}{% if record.metadata.date %} · {{ record.metadata.date }}{% endif %}{% if record.metadata.category %} · {{ record.metadata.category }}{% endif %}</td>
           <td>{{ record.confirmed_by }}</td>
           {% if batch.status == 'sealed' %}

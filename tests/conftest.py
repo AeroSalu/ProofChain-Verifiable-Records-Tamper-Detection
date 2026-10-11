@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from proofchain.ledger import app as ledger_app
 from proofchain.registry import app as registry_app
 
-from .helpers import InProcessLedger
+from .helpers import LEDGER_TOKEN, InProcessLedger, sign_in
 
 VECTORS = Path(__file__).parent / "vectors" / "examples.json"
 
@@ -16,6 +16,13 @@ VECTORS = Path(__file__).parent / "vectors" / "examples.json"
 def vectors():
     """The worked examples from the project brief, as generated for it."""
     return json.loads(VECTORS.read_text(encoding="utf-8"))
+
+
+@pytest.fixture(autouse=True)
+def service_settings(monkeypatch):
+    """Every test ledger expects the same append token, and no test inherits a real session secret."""
+    monkeypatch.setenv("PROOFCHAIN_LEDGER_TOKEN", LEDGER_TOKEN)
+    monkeypatch.delenv("PROOFCHAIN_SESSION_SECRET", raising=False)
 
 
 @pytest.fixture
@@ -37,6 +44,6 @@ def db_path(tmp_path):
 
 @pytest.fixture
 def registry(db_path, ledger):
-    """The registry service on a temporary database, publishing to the ledger above."""
+    """The registry service on a temporary database, publishing to the ledger above, signed in as staff."""
     with TestClient(registry_app.create_app(db_path, ledger)) as client:
-        yield client
+        yield sign_in(client)

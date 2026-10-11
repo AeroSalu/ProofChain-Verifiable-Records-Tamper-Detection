@@ -190,8 +190,11 @@ def paths(tmp_path):
 
 @pytest.fixture
 def client(paths):
-    with TestClient(create_app(*paths)) as running:
+    with TestClient(create_app(*paths), headers=LEDGER_AUTH) as running:
         yield running
+
+
+from .helpers import LEDGER_AUTH  # noqa: E402  (every client below presents the append token)
 
 
 def post(client, batch_id, root, tree_size):
@@ -350,11 +353,11 @@ def test_file_on_disk_is_one_json_entry_per_line(client, paths):
 
 
 def test_restart_keeps_the_key_and_extends_the_same_chain(paths):
-    with TestClient(create_app(*paths)) as first_run:
+    with TestClient(create_app(*paths), headers=LEDGER_AUTH) as first_run:
         key_before = first_run.get("/pubkey").json()
         old = publish_brief_batches(first_run)
 
-    with TestClient(create_app(*paths)) as second_run:
+    with TestClient(create_app(*paths), headers=LEDGER_AUTH) as second_run:
         assert second_run.get("/pubkey").json() == key_before
         assert second_run.get("/entries").json() == old
         added = post(second_run, "batch-0004", "cd" * 32, 2).json()
@@ -369,7 +372,7 @@ def test_restart_keeps_the_key_and_extends_the_same_chain(paths):
 def test_paths_come_from_the_environment_when_not_given(tmp_path, monkeypatch):
     monkeypatch.setenv("PROOFCHAIN_LEDGER_PATH", str(tmp_path / "env" / "ledger.jsonl"))
     monkeypatch.setenv("PROOFCHAIN_LEDGER_KEY_PATH", str(tmp_path / "env" / "key.pem"))
-    with TestClient(create_app()) as running:
+    with TestClient(create_app(), headers=LEDGER_AUTH) as running:
         assert post(running, "batch-0001", ROOT_A, 4).status_code == 201
     assert (tmp_path / "env" / "ledger.jsonl").exists()
     assert (tmp_path / "env" / "key.pem").exists()
@@ -442,7 +445,7 @@ DAMAGE = [edit_root, edit_root_and_rehash, delete_first, delete_middle, swap, ju
 @pytest.fixture
 def written(paths):
     """A three-entry ledger written by a service that has since stopped."""
-    with TestClient(create_app(*paths)) as running:
+    with TestClient(create_app(*paths), headers=LEDGER_AUTH) as running:
         entries = publish_brief_batches(running)
     return entries
 
@@ -456,7 +459,7 @@ def test_damaged_file_is_refused_by_the_store_and_the_service(damage, written, p
     with pytest.raises(LedgerCorrupt):
         LedgerStore(paths[0], load_or_create_key(paths[1]))
     with pytest.raises(LedgerCorrupt):
-        with TestClient(create_app(*paths)):
+        with TestClient(create_app(*paths), headers=LEDGER_AUTH):
             pass
     assert paths[0].read_bytes() == before
 
@@ -466,7 +469,7 @@ def test_file_signed_by_a_different_key_is_refused(written, paths, tmp_path):
     with pytest.raises(LedgerCorrupt, match="not signed by this ledger's key"):
         LedgerStore(paths[0], load_or_create_key(other_key))
     with pytest.raises(LedgerCorrupt):
-        with TestClient(create_app(paths[0], other_key)):
+        with TestClient(create_app(paths[0], other_key), headers=LEDGER_AUTH):
             pass
 
 
@@ -488,7 +491,7 @@ def test_truncating_the_end_is_caught_only_by_a_pinned_verifier(written, paths, 
     pin = Pin(written[-1]["seq"], written[-1]["entry_hash"])
     write_lines(paths[0], written[:1])
 
-    with TestClient(create_app(*paths)) as running:
+    with TestClient(create_app(*paths), headers=LEDGER_AUTH) as running:
         entries = running.get("/entries").json()
         public_key = bytes.fromhex(running.get("/pubkey").json()["public_key"])
     assert entries == written[:1]

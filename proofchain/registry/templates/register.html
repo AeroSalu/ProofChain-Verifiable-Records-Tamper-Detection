@@ -20,7 +20,10 @@
   <button type="submit">Upload and fingerprint</button>
 </form>
 
-<h2>Waiting for confirmation</h2>
+<h2>Waiting for confirmation{% if pending %} ({{ pending | length }}){% endif %}</h2>
+{% if pending %}
+<p class="muted">Each upload below stays here until someone confirms it or discards it. Discarding removes an upload that was never registered; a confirmed record cannot be removed.</p>
+{% endif %}
 {% if not pending %}
 <p class="muted">No records are waiting.</p>
 {% endif %}
@@ -28,6 +31,9 @@
 <form class="card" id="record-{{ record.id }}" method="post" action="/records/{{ record.id }}/confirm">
   <h3>{{ record.filename }}</h3>
   <p class="hash-line">Fingerprint <code>{{ record.fingerprint }}</code> <span class="tag">{{ record.canon }}</span></p>
+  {% if record.same_content %}
+  <p class="banner warn">Same content as {{ record.same_content | join(', ') }}. Confirming this registers it a second time, as a separate leaf with its own proof.</p>
+  {% endif %}
   {% if record.suggested_metadata %}
   <p class="muted">The suggestions below were produced automatically{% if record.suggested_metadata.source == 'claude' %} by Claude (AI){% elif record.suggested_metadata.source == 'rules' %} by simple text rules{% endif %}. Check each one against the document before using it.</p>
   {% else %}
@@ -47,10 +53,11 @@
     </label>
     {% endfor %}
   </div>
-  <label class="narrow">Confirmed by
-    <input name="confirmed_by" required placeholder="Your name">
-  </label>
-  <button type="submit">Confirm and add to the open batch</button>
+  <p class="muted">Confirming records this as checked by <strong>{{ user }}</strong>, the account you are signed in with.</p>
+  <div class="actions">
+    <button type="submit">Confirm and add to the open batch</button>
+    <button type="submit" class="quiet" formaction="/records/{{ record.id }}/discard" formnovalidate>Discard this upload</button>
+  </div>
 </form>
 {% endfor %}
 {% endblock %}

@@ -35,6 +35,11 @@ def init_db(path) -> None:
     conn = connect(path)
     try:
         conn.executescript(SCHEMA)
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(records)")}
+        if "salt" not in columns:
+            raise RuntimeError(
+                f"{path} was created before records were salted and cannot be used. Stop both services and "
+                "delete the registry database, the ledger file and any pin file together, then start again.")
     finally:
         conn.close()
 

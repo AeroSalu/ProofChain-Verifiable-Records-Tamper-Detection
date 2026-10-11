@@ -45,6 +45,9 @@ button { font: inherit; font-weight: 600; color: #fff; background: var(--teal); 
   padding: 9px 16px; cursor: pointer; }
 button:hover { background: #0b5d57; }
 button:disabled { background: #aab4c3; cursor: not-allowed; }
+button.quiet { background: var(--paper); color: var(--red); border: 1px solid #d9a9a3; }
+button.quiet:hover { background: var(--red-soft); }
+.actions { display: flex; flex-wrap: wrap; gap: 10px; }
 button.link { display: inline; padding: 0 2px; background: none; color: var(--teal); text-decoration: underline; }
 .hint { display: block; margin-top: 4px; font-weight: 400; color: var(--muted); }
 
@@ -74,7 +77,16 @@ td:first-child, .nowrap { white-space: nowrap; }
 .banner { padding: 12px 16px; border-radius: 8px; margin: 0 0 18px; border-left: 5px solid; }
 .banner.good { background: var(--teal-soft); border-color: var(--teal); }
 .banner.bad { background: var(--red-soft); border-color: var(--red); }
+.banner.warn { background: var(--amber-soft); border-color: var(--amber); }
 .checks { margin: 0; padding-left: 22px; }
 .checks li { padding: 10px 0; border-bottom: 1px solid var(--line); }
 .checks li:last-child { border-bottom: 0; }
 .checks p { margin: 4px 0 0; }
+
+.account { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin-left: auto; color: #dfe5ee; font-size: .92rem; }
+.account form { margin: 0; }
+.account a { color: #dfe5ee; text-decoration: none; padding: 6px 12px; border-radius: 6px; }
+.account a:hover, .account a[aria-current] { background: rgba(255, 255, 255, .12); }
+button.ghost { padding: 5px 12px; background: transparent; color: #fff; border: 1px solid rgba(255, 255, 255, .45); }
+button.ghost:hover { background: rgba(255, 255, 255, .12); }
+.account .who { font-weight: 600; color: #fff; }
