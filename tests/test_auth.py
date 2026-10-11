@@ -193,7 +193,7 @@ def test_protected_route_works_once_signed_in(method, path, populated):
 def test_home_leads_a_visitor_to_the_login_page(visitor):
     reply = visitor.get("/")
     assert reply.status_code == 200 and reply.url.path == "/login"
-    assert "Staff sign in" in reply.text and "Signed in as" not in reply.text
+    assert "Custodian Login" in reply.text and "Signed in as" not in reply.text
     # The custodian pages are not offered to someone who is not signed in.
     assert 'href="/audit"' not in reply.text and 'href="/verify"' in reply.text
 
@@ -388,7 +388,7 @@ def test_verify_page_works_signed_out(populated, db_path):
 
     page = populated.get("/verify", follow_redirects=False)
     assert page.status_code == 200 and "Run the five checks" in page.text
-    assert "Staff sign in" in page.text and "Signed in as" not in page.text
+    assert "Custodian Login" in page.text and "Signed in as" not in page.text
 
     files = {"document": ("c.txt", b"Document C"), "proof": ("c.proof.json", proof)}
     good = populated.post("/verify", files=files, follow_redirects=False)

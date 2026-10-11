@@ -22,7 +22,7 @@
       <span>Signed in as <span class="who">{{ user }}</span></span>
       <form method="post" action="/logout"><button type="submit" class="ghost">Sign out</button></form>
       {% else %}
-      <a href="/login" {% if page == 'login' %}aria-current="page"{% endif %}>Staff sign in</a>
+      <a href="/login" {% if page == 'login' %}aria-current="page"{% endif %}>Custodian Login</a>
       {% endif %}
     </div>
   </header>
